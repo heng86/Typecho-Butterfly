@@ -29,10 +29,7 @@ $this->need('page_header.php');
         }
         $output .= 
         '<div class="article-sort-item">'.
-       '<a class="article-sort-item-img" href="'.$archives->permalink .'">
-       <img onerror="this.onerror=null;this.src='.$erro.'" src="'.get_ArticleThumbnail($archives).'" alt="'. $archives->title .'">
-        </a>
-         <div class="article-sort-item-info">
+       '<div class="article-sort-item-info">
         <div class="article-sort-item-time">
         <i class="far fa-calendar-alt"></i>
         <time class="post-meta-date-created" datetime=" '.date('Y-m-d',$archives->created).'" title="发表于 '.date('Y-m-d',$archives->created).'">
