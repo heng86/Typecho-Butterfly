@@ -6,6 +6,7 @@
 <!DOCTYPE HTML>
 <html data-theme="light" class="">
 <head>
+    <meta content="always" name="referrer">
     <link rel="icon" type="image/png" href="<?php $this->options->Sitefavicon() ?>">
     <meta charset="<?php $this->options->charset(); ?>">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -27,6 +28,22 @@
     <?php if (!empty($this->options->beautifyBlock) && in_array('ShowBeautifyChange',$this->options->beautifyBlock)): ?>
     <link rel="stylesheet" href="<?php $this->options->themeUrl('css/custom.css?v1.5.9'); ?>">
     <?php endif; ?>
+    <!--百度统计-->
+    <?php if($this->options->baidustatistics != ""): ?>
+    <script>
+    var _hmt = _hmt || [];
+    (function() {
+     var hm = document.createElement("script");
+     hm.src = "https://hm.baidu.com/hm.js?<?php $this->options->baidustatistics(); ?>";
+     var s = document.getElementsByTagName("script")[0]; 
+     s.parentNode.insertBefore(hm, s);
+    })();
+    </script>
+    <?php endif; ?>
+    <!--谷歌AdSense广告-->
+    <?php if($this->options->googleadsense != ""): ?>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=<?php $this->options->googleadsense(); ?>" crossorigin="anonymous"></script>
+    <?php endif; ?>
     <!--图标库-->
     <link href="https://at.alicdn.com/t/font_3159629_5bvsat8p5l.css" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.staticfile.org/font-awesome/6.1.1/css/all.min.css">
@@ -47,6 +64,11 @@
     <?php endif; ?>
     <?php if (!empty($this->options->beautifyBlock) && in_array('showLazyloadBlur',$this->options->beautifyBlock)): ?>
     <style>
+      <?php if($this->options->themeFontSize != ""):?>
+      :root {
+        --global-font-size: <?php $this->options->themeFontSize() ?>;
+      } 
+      <?php endif ?>
         img[data-lazy-src]:not(.loaded) {filter: blur(10px) brightness(1);}img[data-lazy-src].error {filter: none;}
         <?php $this->options->CustomCSS() ?>
     </style>
@@ -55,6 +77,9 @@
     <style>
         @media screen and (max-width:900px){
             #aside-content .card-info,#aside-content .card-announcement,#aside-content .card-recent-post,#aside-content #card-newest-comments,#aside-content .card-categories,#aside-content .card-tags,#aside-content .card-archives,#aside-content .card-webinfo{display:none;}
+        }
+        ins.adsbygoogle[data-ad-status="unfilled"] {
+            display: none !important;
         }
     </style>
     <?php endif; ?>
@@ -112,8 +137,8 @@ const GLOBAL_CONFIG = {
         },
     source: {
             justifiedGallery: {
-                js: "https://<?php $this->options->jsdelivrLink() ?>/npm/flickr-justified-gallery@2/dist/fjGallery.min.js",
-                css: "https://<?php $this->options->jsdelivrLink() ?>/npm/flickr-justified-gallery@2/dist/fjGallery.min.css"
+                js: "https://cdn.bootcdn.net/ajax/libs/flickr-justified-gallery/2.1.2/fjGallery.min.js",
+                css: "https://cdn.bootcdn.net/ajax/libs/flickr-justified-gallery/2.1.2/fjGallery.min.css"
             }
         },
     isPhotoFigcaption: !1,
@@ -263,6 +288,7 @@ var GLOBAL_CONFIG_SITE = {
         if (fontSizeVal !== undefined) {
           document.documentElement.style.setProperty('--global-font-size', fontSizeVal + 'px')
         }
+        if(/iPadliphoneliPod Macintosh/.test(navigator.userAgent)){document.documentElement.classList.add('apple')}
       })()</script>
 <style type="text/css" data-typed-js-css="true">
     .typed-cursor {
@@ -296,6 +322,7 @@ var GLOBAL_CONFIG_SITE = {
     }
   </style>
 <!--额外的-->
+
 <?php if ($this->options->EnableCustomColor === 'true'): ?>
 <style>
 ::-webkit-scrollbar-thumb {
@@ -325,12 +352,49 @@ var GLOBAL_CONFIG_SITE = {
 <?php endif ?>
     <?php $this->header(); ?>
     <?php $this->options->CustomHead() ?>
+<?php if (is_array($this->options->beautifyBlock) && in_array('showNoAlertSearch',$this->options->beautifyBlock)): ?>
+<style>
+#dSearch{
+    display: inline-block;
+}
+#dSearch>input {
+    border: none;
+    opacity: 1;
+    outline: none;
+    width: 35px;
+    text-indent: 2px;
+    transition: all .5s;
+    background: transparent;
+}
+#page-header.nav-fixed #nav ::placeholder,
+#page-header.nav-fixed #nav input {
+    color: var(--font-color);
+}
+
+#nav ::placeholder,
+#nav input {
+    color: var(--light-grey);
+}
+#page-header.not-top-img #nav ::placeholder,
+#page-header.not-top-img #nav input {
+    color: var(--font-color);
+    text-shadow: none;
+}
+
+#page-header.nav-fixed #nav a:hover {
+    color: unset;
+}
+
+</style>
+<?php endif ?>
 </head>
 <body>
 <script src="<?php $this->options->themeUrl('/js/main.js?v1.7.3'); ?>"> </script>
 <script src="<?php $this->options->themeUrl('/js/utils.js?v1.7.3'); ?>"> </script>
 <script src="<?php $this->options->themeUrl('/js/tw_cn.js?v1.7.3'); ?>"> </script>
+<?php if (is_array($this->options->beautifyBlock) && !in_array('showNoAlertSearch',$this->options->beautifyBlock)): ?>
 <script src="<?php $this->options->themeUrl('/js/local-search.js'); ?>"> </script>
+<?php endif ?>
 <?php if($this->options->StaticFile == 'CDN' && $this->options->CDNURL == ''): ?>
 <script src="https://cdn.staticfile.org/jquery/3.6.0/jquery.min.js"></script>
 <script src="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-y/instant.page/5.1.0/instantpage.min.js" type="module"> </script>

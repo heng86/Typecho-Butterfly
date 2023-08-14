@@ -134,6 +134,18 @@
   </div>
 </div>
 <?php endif; ?>
+<?php if($this->options->googleadsense != ""): ?>
+  <div class="ads-wrap">
+  <ins class="adsbygoogle"
+       style="display:block;height: 180px;"
+       data-ad-layout="rectangle,horizonta"
+       data-ad-format="fluid"
+       data-ad-client="<?php $this->options->googleadsense(); ?>"></ins></div>
+  <script>
+       (adsbygoogle = window.adsbygoogle || []).push({});
+  </script>
+  
+<?php endif; ?>
 <nav class="pagination-post" id="pagination">
 <?php $prevId = thePrevCid($this);$nextId=theNextCid($this);?>
 <?php if(!empty($nextId)&&!empty($prevId)) : ?>

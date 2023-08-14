@@ -1,13 +1,13 @@
 <?php
 /**
- * <span><script src="https://cdn.staticfile.org/jquery/1.10.2/jquery.min.js"></script>主题最新版本：<span id="latest">获取中...</span><script>$(document).ready(function() {$.get("https://typecho.wehao.ml", function(data) { $("#latest").text(data.ver);});});</script></span>
+ * <span>主题最新版本：<span id="latest">获取中...</span><script>fetch('https://ty.wehao.org').then(res => res.json()).then(({ver}) => {document.getElementById("latest").textContent = ver})</script></span>
  * 这是 Typecho 版本的 butterfly 主题
  * 主题为移植至Typecho，你可以替换原butterfly主题的index.css文件
  * 当前适配 hexo-butterfly 4.6.0
  * <a href="https://www.wehaox.com">个人网站</a> | <a href="https://blog.wehaox.com/archives/typecho-butterfly.html">主题使用文档</a>
  * @package Typecho-Butterfly
  * @author b站:wehao-
- * @version 1.7.5
+ * @version 1.7.7
  * @link https://space.bilibili.com/34174433
  */
 if (!defined('__TYPECHO_ROOT_DIR__')) exit;
@@ -44,13 +44,48 @@ if($sticky && $this->is('index') || $this->is('front')){
 <?php  $this->need('header.php'); ?>
 <main class="layout" id="content-inner">
 <div class="recent-posts" id="recent-posts">
-<?php while($this->next()): ?>
+<?php 
+if($this->options->googleadsense != ""):
+$i=1;
+if($this->options->pageSize<=5)
+{
+    $k=$m=$g=3;
+}else if($this->options->pageSize==10)
+{
+    $k=rand(3,4);
+    $m=rand(6,8);
+    $g=rand(10,12);
+}else if($this->options->pageSize>5&&$this->options->pageSize<10){
+    $k=$m=$g=4;
+}
+endif;
+while($this->next()): 
+    if($this->options->googleadsense != ""):
+    if($i==$k || $i==$m || $i==$g){
+?>
+ <div class="recent-post-item ads-wrap">
+        <ins class="adsbygoogle"
+             style="display:block;height:200px;width:100%;"
+             data-ad-format="fluid"
+             data-ad-client="<?php $this->options->googleadsense(); ?>"></ins>
+        <script>
+             (adsbygoogle = window.adsbygoogle || []).push({});
+        </script>
+  </div>
+<?php 
+$i++;
+}
+$i++;
+endif;
+?>
     <div class="recent-post-item">
+    <?php if(noCover($this)): ?>  
         <wehao class="post_cover">
-             <a  href="<?php $this->permalink() ?>">
-                 <img class="post-bg" data-lazy-src="<?php echo get_ArticleThumbnail($this);?>" src="<?php echo GetLazyLoad() ?>" onerror="this.onerror=null;this.src='<?php $this->options->themeUrl('img/404.jpg'); ?>'"></a>
+             <a href="<?php $this->permalink() ?>">
+                <img class="post-bg" data-lazy-src="<?php echo get_ArticleThumbnail($this);?>" src="<?php echo GetLazyLoad() ?>" onerror="this.onerror=null;this.src='<?php $this->options->themeUrl('img/404.jpg'); ?>'"></a>
         </wehao>
-    <div class="recent-post-info">
+    <?php endif ?>
+    <div class="recent-post-info<?php echo noCover($this) ? '' : ' no-cover'; ?>">
         <a  class="article-title" href="<?php $this->permalink() ?>"><?php $this->title() ?></a>
         <div class="article-meta-wrap">
         <?php $this->sticky(); ?>
@@ -81,16 +116,11 @@ if($sticky && $this->is('index') || $this->is('front')){
                 <a class="twikoo-count" href="<?php $this->permalink() ?>#comments"><?php $this->commentsNum('0条评论', '1 条评论', '%d 条评论'); ?></a>
             </span>
         </div>
-    <div class="content">
-        <?php 
-        if($this->fields->excerpt && $this->fields->excerpt!='') {
-            echo $this->fields->excerpt;}
-        else{
-            echo $this->excerpt(130);
-        }
-            echo '<br><br><a href="',$this->permalink(),'" title="',$this->title(),'">阅读全文...</a>';
-        ?>
-    </div>
+        <div class="content">
+            <?php summaryContent($this);
+            echo '<br><a href="',$this->permalink(),'" title="',$this->title(),'">阅读全文...</a>';
+                ?>
+            </div>
     </div>
 </div>
 <?php endwhile; ?>
@@ -104,15 +134,15 @@ if($sticky && $this->is('index') || $this->is('front')){
 <script>
 function ver() {console.log(`
 ===================================================================
-                                                                             
+                                                                   
     #####  #    # ##### ##### ###### #####  ###### #      #   #    
     #    # #    #   #     #   #      #    # #      #       # #     
-    #####  #    #   #     #   #####  #    # #####  #        #     
+    #####  #    #   #     #   #####  #    # #####  #        #      
     #    # #    #   #     #   #      #####  #      #        #      
-    #    # #    #   #     #   #      #   #  #      #        #    
+    #    # #    #   #     #   #      #   #  #      #        #     
     #####   ####    #     #   ###### #    # #      ######   #  
     
-                            1.7.5
+                            1.7.7
 ===================================================================
 `);}
 </script>
