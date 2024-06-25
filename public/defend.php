@@ -1,4 +1,3 @@
-<?php if (!defined('__TYPECHO_ROOT_DIR__')) exit; ?>
 <?php
 if (isset($_POST['pwd'])){
 	if (trim($_POST['pwd']) == $this->options->ThemePassword){

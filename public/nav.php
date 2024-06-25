@@ -1,4 +1,3 @@
-<?php if (!defined('__TYPECHO_ROOT_DIR__')) exit; ?>
 <nav id="nav" class="show" >
          <span id="blog-info">
             <a href="<?php $this->options->siteUrl(); ?>">
