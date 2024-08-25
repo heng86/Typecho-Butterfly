@@ -519,36 +519,12 @@ function getGravatar($email, $name, $comments_a, $s = 96, $d = 'mp', $r = 'g')
 {
     preg_match_all('/((\d)*)@qq.com/', $email, $vai);
     if (empty($vai['1']['0'])) {
-        // $hasGravatar = hasGravatar($email);
-        // if($hasGravatar){
-        // $url = 'https://gravatar.loli.net/avatar/';
         $url = Helper::options()->GravatarSelect;
         $url .= md5(strtolower(trim($email)));
         $url .= "?s=$s&d=$d&r=$r";
         $imga = '<img ' . $comments_a . ' src="' . GetLazyLoad() . '" data-lazy-src="' . $url . '" >';
-        // }else{
-        //     $imga = '<img avatar="'.$name.'" color '.$comments_a.'>';
-        //     }
     } else {
-        $qquser = $vai['1']['0'];
-        $db = Typecho_Db::get();
-        if (!array_key_exists('qqk', $db->fetchRow($db->select()->from('table.comments')))) {
-            $db->query('ALTER TABLE `' . $db->getPrefix() . 'comments` ADD `qqk` varchar(64) DEFAULT NULL;');
-        }
-        $dbk = $db->fetchRow($db->select('qqk')->from('table.comments')->where('mail=?', $email))['qqk'];
-        if ($dbk == NULL) {
-            // $geturl = 'https://ptlogin2.qq.com/getface?&imgtype=1&uin=' . $qquser;
-            // $qqurl = file_get_contents($geturl);
-            // $str1 = explode('sdk&k=', $qqurl);
-            // if (isset($str1[1])) {
-            //     $str2 = explode('&t=', $str1[1]);
-            //     $k = $str2[0];
-            //     $db->query($db->update('table.comments')->rows(array('qqk' => $k))->where('mail=?', $email));
-            // }
-            $url = 'https://q1.qlogo.cn/headimg_dl?dst_uin=' . $qquser . '&spec=100';
-        } else {
-            $url = 'https://q1.qlogo.cn/g?b=qq&k=' . $dbk . '&s=100';
-        }
+        $url = 'https://cravatar.cn/avatar/'.md5(strtolower(trim($email)));
         $imga = '<img ' . $comments_a . ' src="' . GetLazyLoad() . '" data-lazy-src="' . $url . '" >';
     }
     return $imga;
