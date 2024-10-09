@@ -1,4 +1,4 @@
-<?php if (!defined('__TYPECHO_ROOT_DIR__')) exit; ?>
+<?php if (!defined('__TYPECHO_ROOT_DIR__')) exit; $post_info = get_post_details($this);?>
 <?php $this->need('post_header.php'); ?>
 <main class="layout" id="content-inner">
   <div id="post">
@@ -31,29 +31,34 @@
             <span class="post-meta-wordcount">
               <i class="far fa-file-word fa-fw post-meta-icon"></i>
               <span class="post-meta-label">字数总计:</span>
-              <span class="word-count"><?php echo art_count($this->cid); ?></span>
+              <span class="word-count"><?php echo $post_info['total_length'] ?></span>
               <span class="post-meta-separator">|</span>
               <i class="far fa-clock fa-fw post-meta-icon"></i>
               <span class="post-meta-label">阅读时长:</span>
-              <span><?php echo art_time($this->cid); ?>分钟</span>
+              <span><?php echo $post_info['reading_time']; ?>分钟</span>
               <span class="post-meta-separator">|</span>
               <span class="post-meta-pv-cv"><i class="far fa-eye fa-fw post-meta-icon"></i>
                 <span class="post-meta-label">阅读量:</span>
-                <span id="busuanzi_value_page_pv"><?php get_post_view($this) ?></span></span>
+                <span id="busuanzi_value_page_pv"><?php echo $post_info['views'] ?></span>
+              </span>
           </div>
         </div>
       </div>
     <?php endif; ?>
     <?php if ($this->fields->showTimeWarning !== 'off' && (time() - ($this->modified)) / 86400 >= $this->options->outoftime) : ?>
       <div class="post-outdate-notice">
-        <div style="width: 95%;">此文章发布已过<?php echo floor((time() - ($this->modified)) / 86400); ?>
-          天，内容可能已经过时。如果资源失效，请留言反馈！
+        <div style="width: 94%;">这篇文章距离最后更新已过<?php echo floor((time() - ($this->modified)) / 86400); ?>
+          天,如果文章内容或图片资源失效，请留言反馈，我会及时处理，谢谢！
         </div><a id="close-outdate"><i class="fas fa-times"></i></a>
       </div>
       <script>
-        $("#close-outdate").click(function() {
-          $(".post-outdate-notice").fadeOut(900);;
-        })
+        document.querySelector("#close-outdate").addEventListener("click", function() {
+          document.querySelector(".post-outdate-notice").style.transition = "opacity 0.9s";
+          document.querySelector(".post-outdate-notice").style.opacity = 0;
+          setTimeout(function() {
+            document.querySelector(".post-outdate-notice").style.display = "none";
+          }, 900);
+        });
       </script>
     <?php endif; ?>
     <article class="post-content" id="article-container">
@@ -178,15 +183,16 @@
         </div>
       <?php endif; ?>
     </nav>
-    <?php if ($this->options->ShowRelatedPosts == 'on') : ?>
+    <?php $this->related($this->options->RelatedPostsNum)->to($relatedPosts);
+     if ($this->options->ShowRelatedPosts == 'on' && !empty($relatedPosts->next())) : ?>
       <div class="relatedPosts">
         <div class="headline">
           <i class="fas fa-thumbs-up fa-fw"></i>
           <span>相关推荐</span>
         </div>
         <div class="relatedPosts-list">
-          <?php $this->related($this->options->RelatedPostsNum)->to($relatedPosts); ?>
-          <?php while ($relatedPosts->next()) : ?><div><a href="<?php $relatedPosts->permalink(); ?>" title="<?php $relatedPosts->title(); ?>"><img class="cover" data-lazy-src="<?php echo get_ArticleThumbnail($relatedPosts); ?>" src="<?php echo GetLazyLoad() ?>" alt="cover">
+          <?php while ($relatedPosts->next()) : ?><div><a href="<?php $relatedPosts->permalink(); ?>" title="<?php $relatedPosts->title(); ?>">
+            <img class="cover" data-lazy-src="<?php echo get_ArticleThumbnail($relatedPosts); ?>" src="<?php echo GetLazyLoad() ?>" alt="cover">
                 <div class="content is-center">
                   <div class="date"><i class="far fa-calendar-alt fa-fw"></i> <?php $relatedPosts->date('Y-m-d'); ?></div>
                   <div class="title"><?php $relatedPosts->title(); ?></div>
@@ -194,14 +200,6 @@
               </a></div><?php endwhile; ?>
         </div>
       </div>
-      <script>
-        $(document).ready(function() {
-          const related = document.querySelector(".relatedPosts-list").innerHTML
-          if (related == '\n') {
-            $(".relatedPosts").remove()
-          }
-        })
-      </script>
     <?php endif ?>
     <?php $this->need('comments.php'); ?>
   </div>
@@ -209,13 +207,6 @@
   <link rel="stylesheet" href="<?php $this->options->themeUrl('css/GrayMac.css'); ?>">
   <script type="text/javascript" src="<?php $this->options->themeUrl('js/prism.js?v1.5.3'); ?>"></script>
   <script type="text/javascript" src="<?php $this->options->themeUrl('js/clipboard.min.js'); ?>"></script>
-  <script>
-    $(document).ready(function() {
-      if ($(".toc").html().length == "14") {
-        $("#card-toc,#mobile-toc-button").remove()
-      }
-    });
-  </script>
   <?php if (!empty($this->options->beautifyBlock) && in_array(
     'showLineNumber',
     $this->options->beautifyBlock
@@ -230,14 +221,6 @@
       })();
     </script>
   <?php endif; ?>
-  <?php if ($this->fields->ShowToc === 'off') : ?>
-    <style>
-      #card-toc,
-      #mobile-toc-button {
-        display: none !important;
-      }
-    </style>
-  <?php endif ?>
 </main>
 <!-- end #main-->
 <?php $this->need('footer.php'); ?>
