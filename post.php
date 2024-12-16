@@ -47,8 +47,8 @@
     <?php endif; ?>
     <?php if ($this->fields->showTimeWarning !== 'off' && (time() - ($this->modified)) / 86400 >= $this->options->outoftime) : ?>
       <div class="post-outdate-notice">
-        <div style="width: 94%;">这篇文章距离最后更新已过<?php echo floor((time() - ($this->modified)) / 86400); ?>
-          天,如果文章内容或图片资源失效，请留言反馈，我会及时处理，谢谢！
+        <div style="width: 94%;">这篇文章更新于<?php echo floor((time() - ($this->modified)) / 86400); ?>
+          天前,内容可能已经过时！
         </div><a id="close-outdate"><i class="fas fa-times"></i></a>
       </div>
       <script>
