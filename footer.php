@@ -3,11 +3,11 @@
   <footer id="footer">
     <div id="footer-wrap">
       <div class="copyright">
-        <div class="copyright">©<?php echo date('Y'); ?> By <?php $this->author(); ?></div>
-        <div class="framework-info">
-          <span>由</span>
+        <div class="copyright">©<?php echo date('Y'); ?><?php $this->options->title(); ?>
+        <span class="footer-separator">&</span>  
+        <span>由</span>
           <a target="_blank" href="http://www.typecho.org">Typecho</a><span> 强力驱动</span>
-          <span class="footer-separator">|</span>
+          <span class="footer-separator">&</span>
           <span>主题</span>
           <a id="btheme" target="_blank" href="https://github.com/wehaox/Typecho-Butterfly">Butterfly</a>
         </div>
