@@ -1,8 +1,9 @@
+<?php if (!defined('__TYPECHO_ROOT_DIR__')) exit; ?>
 <nav id="nav" class="show" >
          <span id="blog-info">
             <a href="<?php $this->options->siteUrl(); ?>">
-                <?php if($this->options->SiteLogo !== '') : ?>
-                <img src="<?php $this->options->SiteLogo() ?>" border="0" width="150px" />
+                <?php if(!empty($this->options->SiteLogo)) : ?>
+                <img src="<?php $this->options->SiteLogo() ?>" width="95px" alt="<?php $this->options->title() ?>" title="<?php $this->options->title() ?>" />
                 <?php else :?>
                 <span class="site-name"><?php $this->options->title() ?></span>
                 <?php endif ?>

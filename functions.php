@@ -1,5 +1,4 @@
 <?php
-use Typecho\Plugin;
 if (!defined('__TYPECHO_ROOT_DIR__'))
     exit;
 
@@ -16,11 +15,17 @@ if (isset($_GET['clearCache']) && is_numeric($_GET['clearCache'])) {
         clearCache('post_content_' . $cid);
         clearCache('post_full_content_' . $cid);
         clearCache('post_parsed_content_' . $cid);
+        clearCache('post_parsed_content_v2_' . $cid);
         clearCache('post_details_' . $cid);
+        clearCache('post_basic_' . $cid);
+        clearCache('post_thumb_' . $cid);
+        clearCache('theme_fields_' . $cid);
         
         // 清除不同用户状态的缓存版本
         clearCache('post_parsed_content_' . $cid . '_logged_in');
         clearCache('post_parsed_content_' . $cid . '_guest');
+        clearCache('post_parsed_content_v2_' . $cid . '_logged_in');
+        clearCache('post_parsed_content_v2_' . $cid . '_guest');
         
         // 清除全站统计相关缓存
         clearCache('all_characters');
@@ -48,11 +53,42 @@ function get_ArticleThumbnail($widget)
     $theme_path = Helper::options()->themeUrl;
     $random = $theme_path . '/img/DefualtThumbnail.jpg';
     $pattern = '/\<img.*?src\=\"(.*?)\"[^>]*>/i';
+    $cid = 0;
+    $content = '';
 
-    //如果有自定义缩略图
-    if ($widget->fields->thumb) {
-        return $widget->fields->thumb;
-    } else if (preg_match_all($pattern, $widget->content, $thumbUrl) && strlen($thumbUrl[1][0]) > 7) {
+    if (is_array($widget)) {
+        $cid = isset($widget['cid']) ? (int)$widget['cid'] : 0;
+        if (!empty($widget['text'])) {
+            $content = $widget['text'];
+        } elseif (!empty($widget['content'])) {
+            $content = $widget['content'];
+        }
+    } elseif (is_object($widget)) {
+        $cid = isset($widget->cid) ? (int)$widget->cid : 0;
+        if (!empty($widget->content)) {
+            $content = $widget->content;
+        } elseif (!empty($widget->text)) {
+            $content = $widget->text;
+        }
+    }
+
+    if ($cid > 0) {
+        $cachedThumb = getCache('post_thumb_' . $cid, 604800);
+        if ($cachedThumb !== false && !empty($cachedThumb)) {
+            return $cachedThumb;
+        }
+
+        $customThumb = getThemeFieldValue($cid, 'thumb', '');
+        if (!empty($customThumb)) {
+            setCache('post_thumb_' . $cid, $customThumb);
+            return $customThumb;
+        }
+    }
+
+    if (!empty($content) && preg_match_all($pattern, $content, $thumbUrl) && strlen($thumbUrl[1][0]) > 7) {
+        if ($cid > 0) {
+            setCache('post_thumb_' . $cid, $thumbUrl[1][0]);
+        }
         return $thumbUrl[1][0];
     } else {
         // 判断是否有Thumb文件夹
@@ -64,15 +100,291 @@ function get_ArticleThumbnail($widget)
                 $images = array_merge($images, glob($theme_dir . '/thumb/*.' . $ext));
             }
             if (!empty($images)) {
-                $index = $widget->cid % count($images); // 使用取模运算确保索引在有效范围内
+                $index = ($cid > 0 ? $cid : 1) % count($images); // 使用取模运算确保索引在有效范围内
                 $random_img = $images[$index];
                 // $random_img = $images[array_rand($images)];
                 $random = Helper::options()->themeUrl . '/thumb/' . basename($random_img);
+                if ($cid > 0) {
+                    setCache('post_thumb_' . $cid, $random);
+                }
                 return $random;
             }
         }
+        if ($cid > 0) {
+            setCache('post_thumb_' . $cid, $random);
+        }
         return $random;
     }
+}
+
+function getThemeFieldMap($cid)
+{
+    static $fieldCache = array();
+    $cid = (int)$cid;
+
+    if ($cid <= 0) {
+        return array();
+    }
+
+    if (isset($fieldCache[$cid])) {
+        return $fieldCache[$cid];
+    }
+
+    $cache_key = 'theme_fields_' . $cid;
+    $cached = getCache($cache_key, 86400);
+    if (is_array($cached)) {
+        $fieldCache[$cid] = $cached;
+        return $cached;
+    }
+
+    $db = Typecho_Db::get();
+    $rows = $db->fetchAll($db->select('name', 'str_value', 'int_value', 'float_value')
+        ->from('table.fields')
+        ->where('cid = ?', $cid));
+
+    $fields = array();
+    foreach ($rows as $row) {
+        $value = null;
+        if (array_key_exists('str_value', $row) && $row['str_value'] !== null && $row['str_value'] !== '') {
+            $value = $row['str_value'];
+        } elseif (array_key_exists('int_value', $row) && $row['int_value'] !== null) {
+            $value = $row['int_value'];
+        } elseif (array_key_exists('float_value', $row) && $row['float_value'] !== null) {
+            $value = $row['float_value'];
+        }
+
+        if ($value !== null) {
+            $fields[$row['name']] = $value;
+        }
+    }
+
+    $fieldCache[$cid] = $fields;
+    setCache($cache_key, $fields);
+    return $fields;
+}
+
+function getThemeFieldValue($cid, $name, $default = null)
+{
+    $fields = getThemeFieldMap($cid);
+    return array_key_exists($name, $fields) ? $fields[$name] : $default;
+}
+
+function getPostPermalinkByRow($post)
+{
+    static $permalinkCache = array();
+    $cid = isset($post['cid']) ? (int)$post['cid'] : 0;
+
+    if ($cid > 0 && isset($permalinkCache[$cid])) {
+        return $permalinkCache[$cid];
+    }
+
+    if (!isset($post['type']) || empty($post['type'])) {
+        $post['type'] = 'post';
+    }
+
+    if (!empty($post['created'])) {
+        $post['year'] = date('Y', $post['created']);
+        $post['month'] = date('m', $post['created']);
+        $post['day'] = date('d', $post['created']);
+    }
+
+    try {
+        $path = Typecho_Router::url($post['type'], $post);
+        if (preg_match('/^https?:\/\//i', $path)) {
+            $url = $path;
+        } else {
+            $url = Typecho_Common::url($path, Helper::options()->index);
+        }
+    } catch (Exception $e) {
+        $slug = !empty($post['slug']) ? $post['slug'] : $cid;
+        $url = rtrim(Helper::options()->siteUrl, '/') . '/' . ltrim($slug, '/');
+    }
+
+    if ($cid > 0) {
+        $permalinkCache[$cid] = $url;
+    }
+
+    return $url;
+}
+
+function getPostBasicByCid($cid)
+{
+    static $postCache = array();
+    $cid = (int)$cid;
+
+    if ($cid <= 0) {
+        return null;
+    }
+
+    if (isset($postCache[$cid])) {
+        return $postCache[$cid];
+    }
+
+    $cache_key = 'post_basic_' . $cid;
+    $cached = getCache($cache_key, 86400);
+    if (is_array($cached)) {
+        $postCache[$cid] = $cached;
+        return $cached;
+    }
+
+    $db = Typecho_Db::get();
+    $row = $db->fetchRow($db->select('cid', 'title', 'slug', 'created', 'modified', 'type', 'status', 'authorId', 'views')
+        ->from('table.contents')
+        ->where('cid = ?', $cid)
+        ->limit(1));
+
+    if (!$row) {
+        $postCache[$cid] = null;
+        return null;
+    }
+
+    $row['permalink'] = getPostPermalinkByRow($row);
+    $postCache[$cid] = $row;
+    setCache($cache_key, $row);
+    return $row;
+}
+
+function getRelatedPostsLite($cid, $limit = 3)
+{
+    $cid = (int)$cid;
+    $limit = max(1, (int)$limit);
+
+    if ($cid <= 0) {
+        return array();
+    }
+
+    $cache_key = 'related_posts_lite_' . $cid . '_' . $limit;
+    $cached = getCache($cache_key, 600);
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $db = Typecho_Db::get();
+    $mids = $db->fetchAll($db->select('mid')
+        ->from('table.relationships')
+        ->where('cid = ?', $cid)
+        ->limit(10));
+
+    if (empty($mids)) {
+        setCache($cache_key, array());
+        return array();
+    }
+
+    $midList = array_map('intval', array_column($mids, 'mid'));
+    $rows = $db->fetchAll($db->select('DISTINCT table.contents.cid', 'table.contents.title', 'table.contents.slug', 'table.contents.created', 'table.contents.modified', 'table.contents.type', 'table.contents.status', 'table.contents.authorId')
+        ->from('table.contents')
+        ->join('table.relationships', 'table.contents.cid = table.relationships.cid')
+        ->where('table.relationships.mid IN ?', $midList)
+        ->where('table.contents.cid <> ?', $cid)
+        ->where('table.contents.status = ?', 'publish')
+        ->where('table.contents.password IS NULL')
+        ->where('table.contents.created < ?', time())
+        ->where('table.contents.type = ?', 'post')
+        ->order('table.contents.created', Typecho_Db::SORT_DESC)
+        ->limit($limit));
+
+    foreach ($rows as &$row) {
+        $row['permalink'] = getPostPermalinkByRow($row);
+    }
+    unset($row);
+
+    setCache($cache_key, $rows);
+    return $rows;
+}
+
+function getRecentPostsLite($limit = 5)
+{
+    $limit = max(1, (int)$limit);
+    $cache_key = 'recent_posts_lite_' . $limit;
+    $cached = getCache($cache_key, 300);
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $db = Typecho_Db::get();
+    $rows = $db->fetchAll($db->select('cid', 'title', 'slug', 'created', 'modified', 'type', 'status', 'authorId', 'text')
+        ->from('table.contents')
+        ->where('status = ?', 'publish')
+        ->where('type = ?', 'post')
+        ->where('created < ?', time())
+        ->where('password IS NULL')
+        ->order('created', Typecho_Db::SORT_DESC)
+        ->limit($limit));
+
+    foreach ($rows as &$row) {
+        $row['permalink'] = getPostPermalinkByRow($row);
+    }
+    unset($row);
+
+    setCache($cache_key, $rows);
+    return $rows;
+}
+
+function getRecentPostsLiteByPage($pageSize = 20, $currentPage = 1)
+{
+    $pageSize = max(1, (int)$pageSize);
+    $currentPage = max(1, (int)$currentPage);
+    $cache_key = 'recent_posts_lite_page_' . $pageSize . '_' . $currentPage;
+    $cached = getCache($cache_key, 300);
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $db = Typecho_Db::get();
+    $rows = $db->fetchAll($db->select('cid', 'title', 'slug', 'created', 'modified', 'type', 'status', 'authorId', 'text')
+        ->from('table.contents')
+        ->where('status = ?', 'publish')
+        ->where('type = ?', 'post')
+        ->where('created < ?', time())
+        ->where('password IS NULL')
+        ->order('created', Typecho_Db::SORT_DESC)
+        ->page($currentPage, $pageSize));
+
+    foreach ($rows as &$row) {
+        $row['permalink'] = getPostPermalinkByRow($row);
+    }
+    unset($row);
+
+    setCache($cache_key, $rows);
+    return $rows;
+}
+
+function getRecentPostsLiteCount()
+{
+    $cache_key = 'recent_posts_lite_count';
+    $cached = getCache($cache_key, 300);
+    if ($cached !== false) {
+        return (int)$cached;
+    }
+
+    $db = Typecho_Db::get();
+    $count = $db->fetchObject($db->select(array('COUNT(cid)' => 'num'))
+        ->from('table.contents')
+        ->where('status = ?', 'publish')
+        ->where('type = ?', 'post')
+        ->where('created < ?', time())
+        ->where('password IS NULL'));
+
+    $total = isset($count->num) ? (int)$count->num : 0;
+    setCache($cache_key, $total);
+    return $total;
+}
+
+function getCommentPermalink($comment)
+{
+    $cid = is_object($comment) ? (int)$comment->cid : (isset($comment['cid']) ? (int)$comment['cid'] : 0);
+    $coid = is_object($comment) ? (int)$comment->coid : (isset($comment['coid']) ? (int)$comment['coid'] : 0);
+
+    if ($cid <= 0) {
+        return '#comment-' . $coid;
+    }
+
+    $post = getPostBasicByCid($cid);
+    if (!$post || empty($post['permalink'])) {
+        return '#comment-' . $coid;
+    }
+
+    return $post['permalink'] . '#comments';
 }
 
 // 主页文章缩略图
@@ -85,27 +397,100 @@ function GetRandomThumbnail($widget)
 function GetRandomThumbnailPost($widget)
 {
     $img = '';
-    if ($widget->fields->thumb) {
-        $img = $widget->fields->thumb;
+    if (isset($widget->cid)) {
+        $img = getThemeFieldValue($widget->cid, 'thumb', '');
     }
     echo $img;
 }
 
 // 添加缓存辅助函数
+function getCacheDirectoryPath()
+{
+    return rtrim(__TYPECHO_ROOT_DIR__, '/\\') . '/usr/cache/';
+}
+
+function setFileCachePermissionWarning($message)
+{
+    if (empty($GLOBALS['butterflyFileCachePermissionWarning'])) {
+        $GLOBALS['butterflyFileCachePermissionWarning'] = $message;
+    }
+}
+
+function getFileCachePermissionWarning()
+{
+    return isset($GLOBALS['butterflyFileCachePermissionWarning']) ? (string)$GLOBALS['butterflyFileCachePermissionWarning'] : '';
+}
+
+function ensureFileCacheDirectoryAvailable()
+{
+    static $available = null;
+
+    if ($available !== null) {
+        return $available;
+    }
+
+    if (Helper::options()->EnableCache != 'file') {
+        $available = false;
+        return false;
+    }
+
+    $cacheDir = getCacheDirectoryPath();
+    $warningMessage = '文件缓存已开启，但 usr/cache/ 目录没有读写权限，已自动跳过缓存读写。';
+
+    if (is_dir($cacheDir)) {
+        if (is_readable($cacheDir) && is_writable($cacheDir)) {
+            $available = true;
+            return true;
+        }
+
+        setFileCachePermissionWarning($warningMessage);
+        $available = false;
+        return false;
+    }
+
+    if (@mkdir($cacheDir, 0755, true) && is_dir($cacheDir) && is_readable($cacheDir) && is_writable($cacheDir)) {
+        $available = true;
+        return true;
+    }
+
+    setFileCachePermissionWarning($warningMessage);
+    $available = false;
+    return false;
+}
+
+function renderFileCachePermissionWarning()
+{
+    if (Helper::options()->EnableCache == 'file') {
+        ensureFileCacheDirectoryAvailable();
+    }
+
+    $message = getFileCachePermissionWarning();
+
+    if ($message === '') {
+        return;
+    }
+
+    echo '<div class="bf-cache-permission-warning" role="alert" style="background:#fff3cd;color:#856404;border-bottom:1px solid #ffe69c;padding:12px 16px;text-align:center;font-size:14px;line-height:1.7;position:relative;z-index:99999;">' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</div>';
+}
+
 function getCache($key, $expiration = 3600) {
     // 检查是否启用缓存
     if (Helper::options()->EnableCache != 'file') {
         return false;
     }
+
+    if (!ensureFileCacheDirectoryAvailable()) {
+        return false;
+    }
     
-    $cache_file = __TYPECHO_ROOT_DIR__ . '/usr/cache/' . md5($key) . '.cache';
+    $cache_file = getCacheDirectoryPath() . md5($key) . '.cache';
     if (file_exists($cache_file) && (time() - filemtime($cache_file) < $expiration)) {
         $data = @file_get_contents($cache_file);
         if ($data === false) {
             return false;
         }
         
-        $unserialized = @unserialize($data);
+        $unserialized = @unserialize($data, ['allowed_classes' => false]);
         if ($unserialized === false && $data !== 'b:0;') {
             // 缓存数据损坏，删除缓存文件
             @unlink($cache_file);
@@ -122,54 +507,22 @@ function setCache($key, $value) {
     if (Helper::options()->EnableCache != 'file') {
         return;
     }
-    
-    if (!is_dir(__TYPECHO_ROOT_DIR__ . '/usr/cache/')) {
-        mkdir(__TYPECHO_ROOT_DIR__ . '/usr/cache/', 0755, true);
+
+    if (!ensureFileCacheDirectoryAvailable()) {
+        return;
     }
-    $cache_file = __TYPECHO_ROOT_DIR__ . '/usr/cache/' . md5($key) . '.cache';
-    file_put_contents($cache_file, serialize($value));
+
+    $cache_file = getCacheDirectoryPath() . md5($key) . '.cache';
+    if (@file_put_contents($cache_file, serialize($value)) === false) {
+        setFileCachePermissionWarning('文件缓存已开启，但 usr/cache/ 目录没有写入权限，已自动跳过缓存写入。');
+    }
 }
 
 // 优化全站字数统计，添加缓存
 function allOfCharacters()
 {
-    $cache_key = 'all_characters';
-    $cache_time = Helper::options()->CacheTime ? intval(Helper::options()->CacheTime) : 86400;
-    $cached_data = getCache($cache_key, $cache_time);
-    
-    if ($cached_data !== false) {
-        echo $cached_data;
-        return;
-    }
-    
-    $showPrivate = 0;
-    $chars = 0;
-    $db = Typecho_Db::get();
-    if ($showPrivate == 0) {
-        $select = $db->select('SUM(LENGTH(text)) AS chars')->from('table.contents')
-                     ->where('table.contents.status = ?', 'publish');
-        $row = $db->fetchRow($select);
-        $chars = $row['chars'];
-    } else {
-        $select = $db->select('text')->from('table.contents');
-        $rows = $db->fetchAll($select);
-        foreach ($rows as $row) {
-            $chars += mb_strlen($row['text'], 'UTF-8');
-        }
-    }
-    
-    $unit = '';
-    if ($chars >= 10000) {
-        $chars /= 10000;
-        $unit = 'W';
-    } else if ($chars >= 1000) {
-        $chars /= 1000;
-        $unit = 'K';
-    }
-    $out = sprintf('%.2lf %s', $chars, $unit);
-    
-    setCache($cache_key, $out);
-    echo $out;
+    $site = getSiteStatistics();
+    echo $site['charCount'];
 }
 
 // function thumb($cid)
@@ -249,6 +602,8 @@ function createCatalog($obj)
     global $catalog_count;
     $catalog = array();
     $catalog_count = 0;
+    $codeBlocks = array();
+    $obj = protectCodeBlocks($obj, $codeBlocks);
     $obj = preg_replace_callback('/<h([1-6])(.*?)>(.*?)<\/h\1>/i', function ($obj) {
         global $catalog;
         global $catalog_count;
@@ -256,7 +611,7 @@ function createCatalog($obj)
         $catalog[] = array('text' => trim(strip_tags($obj[3])), 'depth' => $obj[1], 'count' => $catalog_count);
         return '<h' . $obj[1] . $obj[2] . ' id="cl-' . $catalog_count . '"><a class="markdownIt-Anchor" href="#cl-' . $catalog_count . '"></a>' . $obj[3] . '</h' . $obj[1] . '>';
     }, $obj);
-    return $obj;
+    return restoreCodeBlocks($obj, $codeBlocks);
 }
 
 
@@ -312,9 +667,317 @@ function GetLazyLoad()
     }
 }
 
+function protectCodeBlocks($text, &$codeBlocks)
+{
+    $codeBlocks = array();
+    $patterns = array(
+        '/<figure\b[^>]*class=("|\")[^>]*\bhighlight\b[^>]*\1[^>]*>[\s\S]*?<\/figure>/is',
+        '/(`{3,})([^\r\n]*)\R[\s\S]*?(?:\R\1|\1)(?=\s*(?:\R|$))/m',
+        '/<pre\b[^>]*>.*?<\/pre>/is'
+    );
+
+    foreach ($patterns as $pattern) {
+        $text = preg_replace_callback($pattern, function ($matches) use (&$codeBlocks) {
+            $placeholder = '__BF_CODE_BLOCK_' . str_replace('.', '_', uniqid('', true)) . '_' . count($codeBlocks) . '__';
+            $codeBlocks[$placeholder] = $matches[0];
+            return $placeholder;
+        }, $text);
+    }
+
+    return $text;
+}
+
+function restoreCodeBlocks($text, $codeBlocks)
+{
+    if (empty($codeBlocks)) {
+        return $text;
+    }
+
+    return strtr($text, $codeBlocks);
+}
+
+function normalizeCodeBlockLanguage($language)
+{
+    $language = strtolower(trim((string) $language));
+    $language = preg_replace('/^(language|lang)-/i', '', $language);
+    $language = preg_replace('/[^a-z0-9#+._-]/i', '', $language);
+
+    if ($language === '' || $language === 'text' || $language === 'plaintext' || $language === 'plain-text') {
+        return 'plain';
+    }
+
+    return $language;
+}
+
+function extractCodeLanguageFromAttributes($attributes)
+{
+    if (preg_match('/\bdata-language=("|\")(.*?)\1/i', $attributes, $matches)) {
+        return normalizeCodeBlockLanguage($matches[2]);
+    }
+
+    if (preg_match('/\bclass=("|\")(.*?)\1/i', $attributes, $matches)) {
+        $classes = preg_split('/\s+/', trim($matches[2]));
+        foreach ($classes as $className) {
+            if (preg_match('/^(?:language|lang)-(.+)$/i', $className, $classMatches)) {
+                return normalizeCodeBlockLanguage($classMatches[1]);
+            }
+        }
+    }
+
+    return 'plain';
+}
+
+function hasHighlightedCodeMarkup($code)
+{
+    return preg_match('/<span\b/i', (string) $code) === 1;
+}
+
+function normalizeHighlightedCodeHtmlClasses($html)
+{
+    return preg_replace_callback('/\bclass=("|\")(.*?)\1/i', function ($matches) {
+        $classes = preg_split('/\s+/', trim($matches[2]));
+        $normalizedClasses = array();
+
+        foreach ($classes as $className) {
+            if ($className === '' || $className === 'hljs') {
+                continue;
+            }
+
+            if (strpos($className, 'hljs-') === 0) {
+                $className = substr($className, 5);
+            }
+
+            if ($className === '' || in_array($className, $normalizedClasses, true)) {
+                continue;
+            }
+
+            $normalizedClasses[] = $className;
+        }
+
+        if (empty($normalizedClasses)) {
+            return '';
+        }
+
+        return 'class="' . implode(' ', $normalizedClasses) . '"';
+    }, (string) $html);
+}
+
+function closeHighlightedCodeTags($openTags)
+{
+    $closingTags = '';
+
+    for ($i = count($openTags) - 1; $i >= 0; $i--) {
+        $closingTags .= '</' . $openTags[$i]['name'] . '>';
+    }
+
+    return $closingTags;
+}
+
+function reopenHighlightedCodeTags($openTags)
+{
+    $openingTags = '';
+
+    foreach ($openTags as $openTag) {
+        $openingTags .= $openTag['tag'];
+    }
+
+    return $openingTags;
+}
+
+function isSelfClosingHighlightedCodeTag($token)
+{
+    if (preg_match('/\/\s*>$/', $token)) {
+        return true;
+    }
+
+    return preg_match('/^<\s*(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i', $token) === 1;
+}
+
+function splitHighlightedCodeHtmlLines($html)
+{
+    $html = normalizeHighlightedCodeHtmlClasses($html);
+    $html = str_replace(array("\r\n", "\r"), "\n", (string) $html);
+    $html = preg_replace('/<br\s*\/?>/i', "\n", $html);
+    $html = rtrim($html, "\n");
+
+    if ($html === '') {
+        return array('');
+    }
+
+    $tokens = preg_split('/(<[^>]+>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+    $lines = array();
+    $currentLine = '';
+    $openTags = array();
+    $pushCurrentLine = function () use (&$lines, &$currentLine, &$openTags) {
+        $lineHtml = $currentLine . closeHighlightedCodeTags($openTags);
+        $lines[] = $lineHtml === '' ? ' ' : $lineHtml;
+        $currentLine = reopenHighlightedCodeTags($openTags);
+    };
+
+    foreach ($tokens as $token) {
+        if (preg_match('/^<br\s*\/?>$/i', $token)) {
+            $pushCurrentLine();
+            continue;
+        }
+
+        if ($token !== '' && $token[0] === '<') {
+            if (preg_match('/^<\s*\/\s*([a-z0-9:-]+)/i', $token, $matches)) {
+                $currentLine .= $token;
+                $tagName = strtolower($matches[1]);
+
+                for ($i = count($openTags) - 1; $i >= 0; $i--) {
+                    if ($openTags[$i]['name'] === $tagName) {
+                        array_splice($openTags, $i, 1);
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            $currentLine .= $token;
+
+            if (preg_match('/^<\s*([a-z0-9:-]+)/i', $token, $matches) && !isSelfClosingHighlightedCodeTag($token)) {
+                $openTags[] = array(
+                    'name' => strtolower($matches[1]),
+                    'tag' => $token
+                );
+            }
+
+            continue;
+        }
+
+        $segments = explode("\n", $token);
+        $lastSegmentIndex = count($segments) - 1;
+
+        foreach ($segments as $index => $segment) {
+            $currentLine .= $segment;
+
+            if ($index !== $lastSegmentIndex) {
+                $pushCurrentLine();
+            }
+        }
+    }
+
+    if ($currentLine !== '' || empty($lines)) {
+        $lines[] = $currentLine === '' ? ' ' : $currentLine;
+    }
+
+    return $lines;
+}
+
+function getButterflyCodeBlockLines($code, $isHighlightedHtml = false)
+{
+    if ($isHighlightedHtml) {
+        return splitHighlightedCodeHtmlLines($code);
+    }
+
+    $normalizedCode = str_replace(array("\r\n", "\r"), "\n", html_entity_decode((string) $code, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    $normalizedCode = rtrim($normalizedCode, "\n");
+    $lines = $normalizedCode === '' ? array('') : explode("\n", $normalizedCode);
+
+    foreach ($lines as $index => $line) {
+        $lines[$index] = htmlspecialchars($line, ENT_NOQUOTES, 'UTF-8');
+        if ($lines[$index] === '') {
+            $lines[$index] = ' ';
+        }
+    }
+
+    return $lines;
+}
+
+function buildButterflyCodeBlockHtml($code, $language = 'plain', $isHighlightedHtml = false)
+{
+    $language = normalizeCodeBlockLanguage($language);
+    $lines = getButterflyCodeBlockLines($code, $isHighlightedHtml);
+    $gutterHtml = '';
+    $codeHtml = '';
+    $lastIndex = count($lines) - 1;
+
+    foreach ($lines as $index => $line) {
+        $lineBreak = $index !== $lastIndex ? '<br>' : '';
+        $gutterHtml .= '<span class="line">' . ($index + 1) . '</span>' . $lineBreak;
+        $codeHtml .= '<span class="line">' . $line . '</span>' . $lineBreak;
+    }
+
+    return '<figure class="highlight ' . $language . '"><table><tbody><tr><td class="gutter"><pre>' . $gutterHtml . '</pre></td><td class="code"><pre>' . $codeHtml . '</pre></td></tr></tbody></table></figure>';
+}
+
+function convertCodeBlockToButterflyHtml($block)
+{
+    $trimmedBlock = trim($block);
+
+    if (preg_match('/^<figure\b[^>]*class=("|\")[^>]*\bhighlight\b[^>]*\1[^>]*>/i', $trimmedBlock)) {
+        return $block;
+    }
+
+    if (preg_match('/^(`{3,})([^\r\n]*)\R([\s\S]*?)(?:\R\1|\1)\s*$/', $trimmedBlock, $matches)) {
+        $infoString = trim($matches[2]);
+        $language = $infoString === '' ? 'plain' : preg_split('/\s+/', $infoString)[0];
+        return buildButterflyCodeBlockHtml($matches[3], $language);
+    }
+
+    if (preg_match('/<pre\b([^>]*)>([\s\S]*?)<\/pre>/is', $block, $matches)) {
+        $preAttributes = $matches[1];
+        $preContent = $matches[2];
+        $language = extractCodeLanguageFromAttributes($preAttributes);
+        $codeContent = $preContent;
+        $isHighlightedHtml = false;
+
+        if (preg_match('/<code\b([^>]*)>([\s\S]*?)<\/code>/is', $preContent, $codeMatches)) {
+            $codeContent = $codeMatches[2];
+            $codeLanguage = extractCodeLanguageFromAttributes($codeMatches[1]);
+            if ($language === 'plain' || $codeLanguage !== 'plain') {
+                $language = $codeLanguage;
+            }
+
+            $isHighlightedHtml = hasHighlightedCodeMarkup($codeContent);
+        }
+
+        if ($isHighlightedHtml) {
+            return buildButterflyCodeBlockHtml($codeContent, $language, true);
+        }
+
+        $codeContent = preg_replace('/<br\s*\/?>/i', "\n", $codeContent);
+        return buildButterflyCodeBlockHtml(strip_tags($codeContent), $language);
+    }
+
+    return $block;
+}
+
+function convertProtectedCodeBlocksToButterflyHtml($codeBlocks)
+{
+    if (empty($codeBlocks)) {
+        return $codeBlocks;
+    }
+
+    foreach ($codeBlocks as $placeholder => $block) {
+        $codeBlocks[$placeholder] = convertCodeBlockToButterflyHtml($block);
+    }
+
+    return $codeBlocks;
+}
+
+function replaceHideContent($text, $canViewHiddenContent)
+{
+    $codeBlocks = array();
+    $text = protectCodeBlocks($text, $codeBlocks);
+
+    if ($canViewHiddenContent) {
+        $text = preg_replace("/\[hide\](.*?)\[\/hide\]/sm", '<div class="reply-content">$1</div>', $text);
+    } else {
+        $text = preg_replace("/\[hide\](.*?)\[\/hide\]/sm", '<p class="need-reply">此处内容 <a href="#comments">回复</a> 可见</p>', $text);
+    }
+
+    $codeBlocks = convertProtectedCodeBlocksToButterflyHtml($codeBlocks);
+    return restoreCodeBlocks($text, $codeBlocks);
+}
+
 /* 格式化标签 */
 function ParseCode($text)
 {
+    $codeBlocks = array();
+    $text = protectCodeBlocks($text, $codeBlocks);
     $text = Short_Tabs($text);
     $text = Note_Fsm($text);
     $text = Note_Ico($text);
@@ -328,8 +991,10 @@ function ParseCode($text)
     $text = Bf_Mark($text);
     $text = Font($text);
     $text = ArtPlayer($text);
+    $text = ParseGallery($text);
     $text = PostImage($text);
-    return $text;
+    $codeBlocks = convertProtectedCodeBlocksToButterflyHtml($codeBlocks);
+    return restoreCodeBlocks($text, $codeBlocks);
 }
 // 标签外挂-Tabs
 function Short_Tabs($text)
@@ -537,11 +1202,398 @@ function ArtPlayer($text)
 }
 
 // 重写文章图片加载
+function getImageAttributeValue($imgTag, $attribute)
+{
+    $pattern = '/\b' . preg_quote($attribute, '/') . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/i';
+
+    if (preg_match($pattern, $imgTag, $matches)) {
+        foreach (array(1, 2, 3) as $index) {
+            if (array_key_exists($index, $matches)) {
+                return $matches[$index];
+            }
+        }
+    }
+
+    return '';
+}
+
+function buildImageAltText($src, $alt = '', $title = '')
+{
+    $text = trim(strip_tags(html_entity_decode((string)$alt, ENT_QUOTES, 'UTF-8')));
+
+    if ($text === '') {
+        $text = trim(strip_tags(html_entity_decode((string)$title, ENT_QUOTES, 'UTF-8')));
+    }
+
+    if ($text === '') {
+        $path = parse_url($src, PHP_URL_PATH);
+        if (!empty($path)) {
+            $filename = pathinfo($path, PATHINFO_FILENAME);
+            $filename = trim(preg_replace('/[-_]+/', ' ', $filename));
+            if ($filename !== '') {
+                $text = $filename;
+            }
+        }
+    }
+
+    return $text !== '' ? $text : '文章配图';
+}
+
+function parseButterflyGalleryTagArgs($args)
+{
+    $result = array();
+    preg_match_all('/"([^"]*)"|\'([^\']*)\'|(\S+)/u', trim((string)$args), $matches, PREG_SET_ORDER);
+
+    foreach ($matches as $match) {
+        if (isset($match[1]) && $match[1] !== '') {
+            $result[] = $match[1];
+        } elseif (isset($match[2]) && $match[2] !== '') {
+            $result[] = $match[2];
+        } elseif (isset($match[3])) {
+            $result[] = trim($match[3]);
+        }
+    }
+
+    return $result;
+}
+
+function parseButterflyGalleryOptions($args)
+{
+    $parts = array_map('trim', explode(',', trim((string)$args)));
+
+    return array(
+        'lazyload' => isset($parts[0]) && $parts[0] !== '' ? $parts[0] : 'false',
+        'rowHeight' => isset($parts[1]) && $parts[1] !== '' ? $parts[1] : '220',
+        'limit' => isset($parts[2]) && $parts[2] !== '' ? $parts[2] : '10'
+    );
+}
+
+function normalizeButterflyGalleryText($text)
+{
+    $text = html_entity_decode((string)$text, ENT_QUOTES, 'UTF-8');
+    $text = trim(strip_tags($text));
+
+    return $text;
+}
+
+function normalizeButterflyGalleryUrl($url)
+{
+    return trim(html_entity_decode((string)$url, ENT_QUOTES, 'UTF-8'));
+}
+
+function sanitizeButterflyGalleryUrl($url, $allowDataImage = false)
+{
+    $url = normalizeButterflyGalleryUrl($url);
+    if ($url === '' || preg_match('/[\x00-\x20\x7f"\'<>]/u', $url)) {
+        return '';
+    }
+
+    if (strpos($url, '//') === 0 || strpos($url, '/') === 0 || strpos($url, './') === 0 || strpos($url, '../') === 0) {
+        return $url;
+    }
+
+    if (preg_match('/^[a-z][a-z0-9+.-]*:/i', $url)) {
+        $scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+        if (in_array($scheme, array('http', 'https'), true)) {
+            return $url;
+        }
+
+        if ($allowDataImage && $scheme === 'data' && preg_match('/^data:image\/(?:gif|png|jpe?g|webp);base64,[a-z0-9+\/]+=*$/i', $url)) {
+            return $url;
+        }
+
+        return '';
+    }
+
+    return $url;
+}
+
+function addButterflyGalleryImage(&$images, $src, $alt = '', $title = '')
+{
+    $src = sanitizeButterflyGalleryUrl($src, true);
+    if ($src === '') {
+        return;
+    }
+
+    $alt = normalizeButterflyGalleryText($alt);
+    $title = normalizeButterflyGalleryText($title);
+
+    if ($alt === '') {
+        $alt = buildImageAltText($src, '', $title);
+    }
+    if ($title === '') {
+        $title = $alt;
+    }
+
+    $images[] = array(
+        'url' => $src,
+        'alt' => $alt,
+        'title' => $title
+    );
+}
+
+function parseButterflyGalleryImages($content)
+{
+    $items = array();
+    $content = (string)$content;
+
+    if (preg_match_all('/<img\b[^>]*>/i', $content, $matches, PREG_OFFSET_CAPTURE)) {
+        foreach ($matches[0] as $match) {
+            $imgTag = $match[0];
+            $src = getImageAttributeValue($imgTag, 'data-lazy-src');
+            if ($src === '') {
+                $src = getImageAttributeValue($imgTag, 'src');
+            }
+
+            $items[] = array(
+                'offset' => $match[1],
+                'src' => $src,
+                'alt' => getImageAttributeValue($imgTag, 'alt'),
+                'title' => getImageAttributeValue($imgTag, 'title')
+            );
+        }
+    }
+
+    if (preg_match_all('/!\[([^\]]*)\]\(\s*([^\s\)]+)(?:\s+(?:"([^"]*)"|\'([^\']*)\'|\(([^\)]*)\)))?\s*\)/u', $content, $matches, PREG_OFFSET_CAPTURE)) {
+        foreach ($matches[0] as $index => $match) {
+            $title = '';
+            foreach (array(3, 4, 5) as $titleIndex) {
+                if (isset($matches[$titleIndex][$index][0]) && $matches[$titleIndex][$index][0] !== '') {
+                    $title = $matches[$titleIndex][$index][0];
+                    break;
+                }
+            }
+
+            $items[] = array(
+                'offset' => $match[1],
+                'src' => $matches[2][$index][0],
+                'alt' => isset($matches[1][$index][0]) ? $matches[1][$index][0] : '',
+                'title' => $title
+            );
+        }
+    }
+
+    usort($items, function ($a, $b) {
+        if ($a['offset'] == $b['offset']) {
+            return 0;
+        }
+
+        return $a['offset'] < $b['offset'] ? -1 : 1;
+    });
+
+    $images = array();
+    foreach ($items as $item) {
+        $src = normalizeButterflyGalleryUrl($item['src']);
+        if ($src === '') {
+            continue;
+        }
+
+        addButterflyGalleryImage($images, $src, $item['alt'], $item['title']);
+    }
+
+    return $images;
+}
+
+function isButterflyGalleryLazyload($value)
+{
+    $value = strtolower(trim((string)$value));
+
+    return in_array($value, array('true', 'show', 'on', '1', 'yes'), true);
+}
+
+function normalizeButterflyGalleryNumber($value, $default)
+{
+    $value = (int)trim((string)$value);
+
+    return $value > 0 ? $value : $default;
+}
+
+function renderButterflyGalleryHtml($images, $lazyload = 'false', $rowHeight = '220', $limit = '10')
+{
+    if (empty($images) || !is_array($images)) {
+        return '';
+    }
+
+    $isLazyload = isButterflyGalleryLazyload($lazyload);
+    $rowHeight = normalizeButterflyGalleryNumber($rowHeight, 220);
+    $limit = normalizeButterflyGalleryNumber($limit, 10);
+    $json = json_encode($images, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        return '';
+    }
+
+    return '<div class="gallery butterfly-gallery" style="display:block"><div class="fj-gallery' . ($isLazyload ? ' lazyload' : '') . '" data-rowHeight="' . $rowHeight . '" data-limit="' . $limit . '"><div class="gallery-data">' . htmlspecialchars($json, ENT_NOQUOTES, 'UTF-8') . '</div></div>' . ($isLazyload ? '<button type="button">加载更多<i class="fas fa-angle-down"></i></button>' : '') . '</div>';
+}
+
+function ParseGallery($text)
+{
+    $text = preg_replace_callback('/(?:<p>\s*)?\{%\s*galleryGroup\s+([^%]*?)\s*%\}(?:\s*<\/p>)?/iu', function ($matches) {
+        $args = parseButterflyGalleryTagArgs($matches[1]);
+        $name = isset($args[0]) ? $args[0] : '';
+        $description = isset($args[1]) ? $args[1] : '';
+        $url = isset($args[2]) ? $args[2] : '';
+        $img = isset($args[3]) ? $args[3] : '';
+
+        if ($name === '' && $url === '' && $img === '') {
+            return $matches[0];
+        }
+
+        $url = sanitizeButterflyGalleryUrl($url, false);
+        $img = sanitizeButterflyGalleryUrl($img, true);
+
+        return '<figure class="gallery-group"><img class="gallery-group-img no-lightbox" src="' . htmlspecialchars($img, ENT_QUOTES, 'UTF-8') . '" alt="Group Image Gallery"><figcaption><div class="gallery-group-name">' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</div><p>' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '</p><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"></a></figcaption></figure>';
+    }, $text);
+
+    $text = preg_replace_callback('/(?:<p>\s*)?\{%\s*gallery\b([^%]*?)\s*%\}(?:\s*<br\s*\/?>)?(?:\s*<\/p>)?([\s\S]*?)(?:<p>\s*)?\{%\s*endgallery\s*%\}(?:\s*<\/p>)?/iu', function ($matches) {
+        $options = parseButterflyGalleryOptions($matches[1]);
+        $images = parseButterflyGalleryImages($matches[2]);
+        $html = renderButterflyGalleryHtml($images, $options['lazyload'], $options['rowHeight'], $options['limit']);
+
+        return $html !== '' ? $html : $matches[0];
+    }, $text);
+
+    return $text;
+}
+
+function getButterflyPhotoGalleryCover($row)
+{
+    $cid = isset($row['cid']) ? (int)$row['cid'] : 0;
+    $thumb = getThemeFieldValue($cid, 'thumb', '');
+    $thumb = sanitizeButterflyGalleryUrl($thumb, true);
+    if ($thumb !== '') {
+        return $thumb;
+    }
+
+    if (!empty($row['text'])) {
+        $contentImages = parseButterflyGalleryImages($row['text']);
+        if (!empty($contentImages[0]['url'])) {
+            return $contentImages[0]['url'];
+        }
+    }
+
+    return get_ArticleThumbnail($row);
+}
+
+function getButterflyPhotoGalleryDescription($row)
+{
+    $cid = isset($row['cid']) ? (int)$row['cid'] : 0;
+    $description = getThemeFieldValue($cid, 'summaryContent', '');
+    if (trim((string)$description) === '') {
+        $description = getThemeFieldValue($cid, 'desc', '');
+    }
+
+    if (trim((string)$description) === '' && !empty($row['text'])) {
+        $description = preg_replace('/\{%\s*gallery[\s\S]*?\{%\s*endgallery\s*%\}/iu', '', $row['text']);
+        $description = preg_replace('/\{%\s*galleryGroup\s+[^%]*?%\}/iu', '', $description);
+    }
+
+    $description = normalizeButterflyGalleryText($description);
+    if (function_exists('mb_substr')) {
+        return mb_substr($description, 0, 80, 'UTF-8');
+    }
+
+    return substr($description, 0, 240);
+}
+
+function getButterflyPhotoGalleryPages($excludeCid = 0)
+{
+    $excludeCid = (int)$excludeCid;
+    $db = Typecho_Db::get();
+    $rows = $db->fetchAll($db->select('cid', 'title', 'slug', 'created', 'modified', 'type', 'status', 'authorId', 'text', 'template')
+        ->from('table.contents')
+        ->where('status = ?', 'publish')
+        ->where('type = ?', 'page')
+        ->where('created < ?', time())
+        ->where('password IS NULL')
+        ->order('table.contents.order', Typecho_Db::SORT_ASC));
+
+    $pages = array();
+    foreach ($rows as $row) {
+        $cid = isset($row['cid']) ? (int)$row['cid'] : 0;
+        if ($cid <= 0 || $cid === $excludeCid) {
+            continue;
+        }
+
+        $template = isset($row['template']) ? (string)$row['template'] : '';
+        $hasGalleryTag = !empty($row['text']) && preg_match('/\{%\s*gallery\b/i', $row['text']);
+        if ($template !== 'photos.php' && !$hasGalleryTag) {
+            continue;
+        }
+
+        $row['permalink'] = getPostPermalinkByRow($row);
+        $row['cover'] = getButterflyPhotoGalleryCover($row);
+        $row['description'] = getButterflyPhotoGalleryDescription($row);
+        $pages[] = $row;
+    }
+
+    return $pages;
+}
+
+function renderButterflyPhotoGalleryGroup($name, $description, $url, $img)
+{
+    $url = sanitizeButterflyGalleryUrl($url, false);
+    $img = sanitizeButterflyGalleryUrl($img, true);
+    if ($url === '' || $img === '') {
+        return '';
+    }
+
+    return '<figure class="gallery-group"><img class="gallery-group-img no-lightbox" src="' . htmlspecialchars($img, ENT_QUOTES, 'UTF-8') . '" alt="Group Image Gallery"><figcaption><div class="gallery-group-name">' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</div><p>' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '</p><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"></a></figcaption></figure>';
+}
+
+function renderButterflyPhotoGalleryList($excludeCid = 0)
+{
+    $pages = getButterflyPhotoGalleryPages($excludeCid);
+    if (empty($pages)) {
+        return '<div class="gallery-group-main"><p class="is-center">暂无照片墙</p></div>';
+    }
+
+    $html = '<div class="gallery-group-main">';
+    foreach ($pages as $page) {
+        $html .= renderButterflyPhotoGalleryGroup(
+            isset($page['title']) ? $page['title'] : '',
+            isset($page['description']) ? $page['description'] : '',
+            isset($page['permalink']) ? $page['permalink'] : '',
+            isset($page['cover']) ? $page['cover'] : ''
+        );
+    }
+    $html .= '</div>';
+
+    return $html;
+}
+
 function PostImage($text)
 {
-    $pattern = '/<img[^>]*src="([^"]+)"[^>]*alt="([^"]+)"[^>]*(style="[^"]+")[^>]*>/i';
-    $replacement = '<img title="$2" alt="$2" data-lazy-src="$1" $3 src="' . GetLazyLoad() . '">';
-    $text = preg_replace($pattern, $replacement, $text);
+    $text = preg_replace_callback('/<img\b[^>]*>/i', function ($matches) {
+        $imgTag = $matches[0];
+        $src = getImageAttributeValue($imgTag, 'src');
+
+        if ($src === '') {
+            return $imgTag;
+        }
+
+        $altText = buildImageAltText(
+            $src,
+            getImageAttributeValue($imgTag, 'alt'),
+            getImageAttributeValue($imgTag, 'title')
+        );
+
+        $attributes = preg_replace('/^<img\b/i', '', $imgTag);
+        $attributes = preg_replace('/\/?\s*>$/', '', $attributes);
+        $attributes = preg_replace('/\s(?:src|data-lazy-src|alt|title)\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $attributes);
+        $attributes = trim($attributes);
+
+        $newTag = '<img';
+        if ($attributes !== '') {
+            $newTag .= ' ' . $attributes;
+        }
+        $newTag .= ' title="' . htmlspecialchars($altText, ENT_QUOTES, 'UTF-8') . '"';
+        $newTag .= ' alt="' . htmlspecialchars($altText, ENT_QUOTES, 'UTF-8') . '"';
+        $newTag .= ' data-lazy-src="' . htmlspecialchars($src, ENT_QUOTES, 'UTF-8') . '"';
+        $newTag .= ' src="' . htmlspecialchars(GetLazyLoad(), ENT_QUOTES, 'UTF-8') . '">';
+
+        return $newTag;
+    }, $text);
+
     return $text;
 }
 
@@ -593,17 +1645,46 @@ function tagsNum($display = true)
 //获取Gravatar头像 QQ邮箱取用qq头像
 function getGravatar($email, $name, $comments_a, $s = 96, $d = 'mp', $r = 'g')
 {
+    $avatarAlt = htmlspecialchars((trim((string)$name) !== '' ? trim((string)$name) : '访客') . ' 的头像', ENT_QUOTES, 'UTF-8');
     preg_match_all('/((\d)*)@qq.com/', $email, $vai);
     if (empty($vai['1']['0'])) {
         $url = Helper::options()->GravatarSelect;
         $url .= md5(strtolower(trim($email)));
         $url .= "?s=$s&d=$d&r=$r";
-        $imga = '<img ' . $comments_a . ' src="' . GetLazyLoad() . '" data-lazy-src="' . $url . '" >';
+        $imga = '<img ' . $comments_a . ' src="' . GetLazyLoad() . '" data-lazy-src="' . $url . '" alt="' . $avatarAlt . '" title="' . $avatarAlt . '">';
     } else {
         $url = 'https://cravatar.cn/avatar/'.md5(strtolower(trim($email)));
-        $imga = '<img ' . $comments_a . ' src="' . GetLazyLoad() . '" data-lazy-src="' . $url . '" >';
+        $imga = '<img ' . $comments_a . ' src="' . GetLazyLoad() . '" data-lazy-src="' . $url . '" alt="' . $avatarAlt . '" title="' . $avatarAlt . '">';
     }
     return $imga;
+}
+
+// 获取作者头像URL (融合自定义URL与Gravatar逻辑)
+function getAuthorAvatarUrl() {
+    $options = Helper::options();
+    $mode = $options->LogoAvatarMode;
+
+    // 如果选择 Gravatar 模式且填写了邮箱
+    if ($mode == 'gravatar' && !empty($options->authorGravatarEmail)) {
+        $email = $options->authorGravatarEmail;
+        $hash = md5(strtolower(trim($email)));
+
+        // 匹配是否为 QQ 邮箱
+        preg_match_all('/((\d)*)@qq.com/', $email, $vai);
+        if (empty($vai['1']['0'])) {
+            // 普通邮箱，调用后台选择的源
+            $cdn = $options->GravatarSelect;
+        } else {
+            // QQ邮箱，按照你评论区的逻辑，直接强制使用 cravatar 或者是对应的QQ源
+            $cdn = 'https://cravatar.cn/avatar/';
+        }
+
+        // 返回拼接好的链接，s=200 设置图片大小更清晰
+        return $cdn . $hash . '?s=200';
+    }
+
+    // 默认或未填邮箱时，返回自定义URL
+    return $options->logoUrl;
 }
 
 // 获取浏览器信息
@@ -709,11 +1790,24 @@ function commentRank($widget, $email = NULL)
 //获取评论的锚点链接
 function get_comment_at($coid)
 {
+    static $commentParentCache = array();
+    $coid = (int)$coid;
+
+    if ($coid <= 0) {
+        return;
+    }
+
+    if (isset($commentParentCache[$coid])) {
+        echo $commentParentCache[$coid];
+        return;
+    }
+
     $db = Typecho_Db::get();
     $prow = $db->fetchRow($db->select('parent,status')->from('table.comments')
         ->where('coid = ?', $coid)); //当前评论
     $mail = "";
     $parent = @$prow['parent'];
+    $output = '';
     if ($parent != "0") { //子评论
         $arow = $db->fetchRow($db->select('author,status,mail')->from('table.comments')
             ->where('coid = ?', $parent)); //查询该条评论的父评论的信息
@@ -721,24 +1815,23 @@ function get_comment_at($coid)
         $mail = @$arow['mail'];
         if (@$author && $arow['status'] == "approved") { //父评论作者存在且父评论已经审核通过
             if (@$prow['status'] == "waiting") {
-                echo '<p class="commentReview">（评论审核中）)</p>';
+                $output .= '<p class="commentReview">（评论审核中）)</p>';
             }
-            echo '<a onclick="b(this);return false;" href="#comment-' . $parent . '">@' . $author . '</a>';
+            $output .= '<a onclick="b(this);return false;" href="#comment-' . $parent . '">@' . $author . '</a>';
         } else { //父评论作者不存在或者父评论没有审核通过
             if (@$prow['status'] == "waiting") {
-                echo '<p class="commentReview">（评论审核中）)</p>';
-            } else {
-                echo '';
+                $output .= '<p class="commentReview">（评论审核中）)</p>';
             }
         }
 
     } else { //母评论，无需输出锚点链接
         if (@$prow['status'] == "waiting") {
-            echo '<p class="commentReview">（评论审核中）)</p>';
-        } else {
-            echo '';
+            $output .= '<p class="commentReview">（评论审核中）)</p>';
         }
     }
+
+    $commentParentCache[$coid] = $output;
+    echo $output;
 }
 /**
  * 重写评论显示函数
@@ -783,7 +1876,7 @@ function threadedComments($comments, $options)
                     <?php $parentMail = get_comment_at($comments->coid) ?>
                     <?php echo $parentMail; ?>
                 </b>
-                <a class="vtime" href="<?php $comments->permalink(); ?>"><?php $comments->date('Y-m-d H:i'); ?></a>
+                <a class="vtime" href="#comment-<?php echo $comments->coid; ?>"><?php $comments->date('Y-m-d H:i'); ?></a>
                 <?php if (Helper::options()->CloseComments == 'off'): ?>
                     <span class="comment-reply">
                         <?php $comments->reply(); ?>
@@ -836,26 +1929,60 @@ function printTag($that)
 //当前人数
 function onlinePeople()
 {
-    $online_log = "usr/themes/butterfly/online.dat"; //保存人数的文件到根目录,
+    $online_log = __DIR__ . '/online.dat'; // 保存人数的文件到当前主题目录
     $timeout = 30; //30秒内没动作者,认为掉线
-    if (!file_exists($online_log)) {
-        fopen($online_log, "w");
+    $remoteAddr = isset($_SERVER['REMOTE_ADDR']) ? trim((string) $_SERVER['REMOTE_ADDR']) : trim((string) getenv('REMOTE_ADDR'));
+
+    if ($remoteAddr === '') {
+        echo 0;
+        return;
     }
-    $entries = file($online_log);
+
+    if (!file_exists($online_log)) {
+        $createFile = @fopen($online_log, 'w');
+        if ($createFile === false) {
+            echo 0;
+            return;
+        }
+        fclose($createFile);
+    }
+
+    if (!is_readable($online_log) || !is_writable($online_log)) {
+        echo 0;
+        return;
+    }
+
+    $entries = @file($online_log);
+    if ($entries === false) {
+        echo 0;
+        return;
+    }
+
     $temp = array();
     for ($i = 0; $i < count($entries); $i++) {
         $entry = explode(",", trim($entries[$i]));
-        if (($entry[0] != getenv('REMOTE_ADDR')) && ($entry[1] > time())) {
+        if (count($entry) < 2) {
+            continue;
+        }
+        if (($entry[0] != $remoteAddr) && ((int) $entry[1] > time())) {
             array_push($temp, $entry[0] . "," . $entry[1] . "\n"); //取出其他浏览者的信息,并去掉超时者,保存进$temp
         }
     }
-    array_push($temp, getenv('REMOTE_ADDR') . "," . (time() + ($timeout)) . "\n"); //更新浏览者的时间
+    array_push($temp, $remoteAddr . "," . (time() + ($timeout)) . "\n"); //更新浏览者的时间
     $slzxrs = count($temp); //计算在线人数
     $entries = implode("", $temp);
     //写入文件
-    $fp = fopen($online_log, "w");
-    flock($fp, LOCK_EX); //flock() 不能在NFS以及其他的一些网络文件系统中正常工作
-    fputs($fp, $entries);
+    $fp = @fopen($online_log, "w");
+    if ($fp === false) {
+        echo 0;
+        return;
+    }
+    if (!@flock($fp, LOCK_EX)) {
+        fclose($fp);
+        echo 0;
+        return;
+    }
+    fwrite($fp, $entries);
     flock($fp, LOCK_UN);
     fclose($fp);
     echo $slzxrs;
@@ -863,9 +1990,13 @@ function onlinePeople()
 
 function only_get_post_view($archive)
 {
-    $db = Typecho_Db::get();
     $cid = $archive->cid;
-    $exist = $db->fetchRow($db->select('views')->from('table.contents')->where('cid = ?', $cid))['views'];
+    if (is_object($archive) && isset($archive->views)) {
+        $exist = (int)$archive->views;
+    } else {
+        $post = getPostBasicByCid($cid);
+        $exist = $post && isset($post['views']) ? (int)$post['views'] : 0;
+    }
     if ($exist >= 10000) {
         $out = sprintf('%.2f W', $exist / 10000);
     } else {
@@ -876,21 +2007,8 @@ function only_get_post_view($archive)
 //总访问量
 function theAllViews()
 {
-    $cache_key = 'all_views';
-    $cache_time = Helper::options()->CacheTime ? intval(Helper::options()->CacheTime) : 86400;
-    $cached_data = getCache($cache_key, $cache_time);
-    
-    if ($cached_data !== false) {
-        echo $cached_data;
-        return;
-    }
-    
-    $db = Typecho_Db::get();
-    $row = $db->fetchRow($db->select('SUM(views) AS views')->from('table.contents'));
-    $views = array_values($row)[0];
-    
-    setCache($cache_key, $views);
-    echo $views;
+    $site = getSiteStatistics();
+    echo $site['totalViews'];
 }
 //  回复可见       
 Typecho_Plugin::factory('Widget_Abstract_Contents')->excerptEx = array('myyodux', 'one');
@@ -916,7 +2034,7 @@ class myyodux
 function thePrevCid($widget, $default = NULL)
 {
     $db = Typecho_Db::get();
-    $sql = $db->select()->from('table.contents')
+    $sql = $db->select('cid')->from('table.contents')
         ->where('table.contents.created < ?', $widget->created)
         ->where('table.contents.status = ?', 'publish')
         ->where('table.contents.type = ?', $widget->type)
@@ -940,7 +2058,7 @@ function thePrevCid($widget, $default = NULL)
 function theNextCid($widget, $default = NULL)
 {
     $db = Typecho_Db::get();
-    $sql = $db->select()->from('table.contents')
+    $sql = $db->select('cid')->from('table.contents')
         ->where('table.contents.created > ?', $widget->created)
         ->where('table.contents.status = ?', 'publish')
         ->where('table.contents.type = ?', $widget->type)
@@ -1093,65 +2211,99 @@ function RecapOutPut($login)
         <div style="margin-top: 10px;" class="cf-turnstile" id="cf-turnstile" 
         data-sitekey=' . Helper::options()->turnstileSiteKey . '
         data-theme="auto"></div>
-        <script>
-        let turnstileWidgetId = null;
-        
-        function loadTurnstile() {
-            if (typeof turnstile === "undefined") {
-                let script = document.createElement("script");
+        <script data-pjax>
+        (() => {
+            const state = window.__butterflyTurnstileState || (window.__butterflyTurnstileState = {
+                widgetId: null,
+                observer: null,
+                scriptLoading: false
+            });
+
+            window.initTurnstileWidget = function() {
+                const target = document.getElementById("cf-turnstile");
+                if (!target || typeof turnstile === "undefined" || typeof turnstile.render !== "function") {
+                    return;
+                }
+
+                const theme = document.documentElement.getAttribute("data-theme") || "auto";
+
+                if (state.widgetId !== null) {
+                    try {
+                        turnstile.remove(state.widgetId);
+                    } catch (error) {}
+                    state.widgetId = null;
+                }
+
+                target.innerHTML = "";
+                state.widgetId = turnstile.render("#cf-turnstile", {
+                    sitekey: "' . Helper::options()->turnstileSiteKey . '",
+                    theme: theme
+                });
+            };
+
+            window.loadTurnstile = function() {
+                if (!document.getElementById("cf-turnstile")) {
+                    return;
+                }
+
+                if (typeof turnstile !== "undefined") {
+                    window.initTurnstileWidget();
+                    return;
+                }
+
+                if (state.scriptLoading) {
+                    return;
+                }
+
+                const existingScript = document.querySelector("script[data-turnstile-api=\"true\"]");
+                if (existingScript) {
+                    state.scriptLoading = true;
+                    existingScript.addEventListener("load", function handleTurnstileLoad() {
+                        existingScript.removeEventListener("load", handleTurnstileLoad);
+                        state.scriptLoading = false;
+                        window.initTurnstileWidget();
+                    });
+                    return;
+                }
+
+                state.scriptLoading = true;
+                const script = document.createElement("script");
                 script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
                 script.async = true;
                 script.defer = true;
-                document.head.appendChild(script);
-                
+                script.dataset.turnstileApi = "true";
                 script.onload = function() {
-                    initTurnstile();
+                    state.scriptLoading = false;
+                    window.initTurnstileWidget();
                 };
-            } else {
-                initTurnstile();
-            }
-        }
-        
-        function initTurnstile() {
-            if (document.getElementById("cf-turnstile")) {
-                let theme = document.documentElement.getAttribute("data-theme") || "auto";
-                if (turnstile && typeof turnstile.render === "function") {
-                    if (turnstileWidgetId) {
-                        turnstile.remove(turnstileWidgetId);
-                    }
-                    turnstileWidgetId = turnstile.render("#cf-turnstile", {
-                        sitekey: "' . Helper::options()->turnstileSiteKey . '",
-                        theme: theme
-                    });
+                script.onerror = function() {
+                    state.scriptLoading = false;
+                };
+                document.head.appendChild(script);
+            };
+
+            window.setupThemeObserver = function() {
+                if (state.observer) {
+                    return;
                 }
-            }
-        }
-        
-        // 监视主题变化
-        function setupThemeObserver() {
-            // 使用 MutationObserver 观察 data-theme 属性变化
-            const observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
-                    if (mutation.type === "attributes" && mutation.attributeName === "data-theme") {
-                        // 主题已变更，更新 Turnstile
-                        if (typeof turnstile !== "undefined" && turnstileWidgetId) {
-                            initTurnstile();
+
+                state.observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === "attributes" && mutation.attributeName === "data-theme" && document.getElementById("cf-turnstile")) {
+                            window.initTurnstileWidget();
                         }
-                    }
+                    });
                 });
-            });
-            
-            // 开始观察文档根元素的 data-theme 属性
-            observer.observe(document.documentElement, { 
-                attributes: true,
-                attributeFilter: ["data-theme"]
-            });
-        }
-        
-        document.addEventListener("DOMContentLoaded", () => {
-            loadTurnstile();
-            setupThemeObserver();
-        });
+
+                state.observer.observe(document.documentElement, {
+                    attributes: true,
+                    attributeFilter: ["data-theme"]
+                });
+            };
+
+            window.loadTurnstile();
+            window.setupThemeObserver();
+        })();
         </script>
         ';
     }
@@ -1167,7 +2319,18 @@ function comments_filter($comment)
             $secretKey = Helper::options()->secretKey;
             function getCaptcha($recaptcha_response, $secretKey)
             {
-                $response = file_get_contents("https://recaptcha.net/recaptcha/api/siteverify?secret=" . $secretKey . "&response=" . $recaptcha_response);
+                $postData = http_build_query([
+                    'secret' => $secretKey,
+                    'response' => $recaptcha_response
+                ]);
+                $context = stream_context_create([
+                    'http' => [
+                        'method' => 'POST',
+                        'header' => 'Content-Type: application/x-www-form-urlencoded',
+                        'content' => $postData
+                    ]
+                ]);
+                $response = file_get_contents('https://recaptcha.net/recaptcha/api/siteverify', false, $context);
                 $response = json_decode($response);
                 return $response;
             }
@@ -1204,7 +2367,19 @@ function hcaptcha_filter($comment)
         } else {
             if (isset($_POST['h-captcha-response']) && !empty($_POST['h-captcha-response'])) {
                 $secret = Helper::options()->hcaptchaAPIKey;
-                $verifyResponse = file_get_contents('https://hcaptcha.com/siteverify?secret=' . $secret . '&response=' . $_POST['h-captcha-response'] . '&remoteip=' . $_SERVER['REMOTE_ADDR']);
+                $postData = http_build_query([
+                    'secret' => $secret,
+                    'response' => $_POST['h-captcha-response'],
+                    'remoteip' => $_SERVER['REMOTE_ADDR']
+                ]);
+                $context = stream_context_create([
+                    'http' => [
+                        'method' => 'POST',
+                        'header' => 'Content-Type: application/x-www-form-urlencoded',
+                        'content' => $postData
+                    ]
+                ]);
+                $verifyResponse = file_get_contents('https://hcaptcha.com/siteverify', false, $context);
                 $responseData = json_decode($verifyResponse);
                 if ($responseData->success === true || $responseData->success === 1) {
                     return $comments;
@@ -1272,14 +2447,19 @@ function turnstile_filter($comment){
 // 微博热搜
 function weibohot()
 {
-    $api = file_get_contents('https://weibo.com/ajax/side/hotSearch');
-    $data = json_decode($api, true)['data']['realtime'];
+    $headers = array(
+        'referer: https://weibo.com/newlogin?tabtype=list&openLoginLayer=0&url=https://weibo.com/',
+    );
+    $api = restFull('https://weibo.com/ajax/side/hotSearch', array(), 'GET', $headers);
+    $result = json_decode($api, true);
+    $data = isset($result['data']['realtime']) && is_array($result['data']['realtime']) ? $result['data']['realtime'] : array();
 
     $jyzy = array(
         '电影' => '影',
         '剧集' => '剧',
         '综艺' => '综',
         '音乐' => '音',
+        '演出' => '演',
         '盛典' => '盛',
         '晚会' => '晚',
     );
@@ -1294,6 +2474,7 @@ function weibohot()
         '影' => 'weibo-jyzy',
         '剧' => 'weibo-jyzy',
         '综' => 'weibo-jyzy',
+        '演' => 'weibo-jyzy',
         '盛' => 'weibo-jyzy',
         '晚' => 'weibo-jyzy',
     );
@@ -1315,10 +2496,11 @@ function weibohot()
         if (isset($item['is_new'])) {
             $hot = '新';
         }
-        if (isset($item['flag_desc'])) {
+        if (!empty($item['flag_desc']) && isset($jyzy[$item['flag_desc']])) {
             $hot = $jyzy[$item['flag_desc']];
         }
-        echo '<div class="weibo-list-item"><div class="weibo-hotness ' . $hotness[$hot] . '">' . $hot . '</div><span class="weibo-title"><a title="' . $item['note'] . '" href="https://s.weibo.com/weibo?q=%23' . $item['word'] . '%23" target="_blank" rel="external nofollow noreferrer" style="color:#a08ed5">' . $item['note'] . '</a></span><div class="weibo-num"><span>' . $item['num'] . '</span></div></div>';
+        $hotClass = isset($hotness[$hot]) ? $hotness[$hot] : 'weibo-recommend';
+        echo '<div class="weibo-list-item"><div class="weibo-hotness ' . $hotClass . '">' . $hot . '</div><span class="weibo-title"><a title="' . $item['note'] . '" href="https://s.weibo.com/weibo?q=%23' . $item['word'] . '%23" target="_blank" rel="external nofollow noreferrer" style="color:#a08ed5">' . $item['note'] . '</a></span><div class="weibo-num"><span>' . $item['num'] . '</span></div></div>';
     }
 }
 
@@ -1326,8 +2508,9 @@ function weibohot()
 function summaryContent($widget)
 {
     $summaryContent = '';
-    if ($widget->fields->summaryContent) {
-        $summaryContent = $widget->fields->summaryContent;
+    $customSummary = isset($widget->cid) ? getThemeFieldValue($widget->cid, 'summaryContent', '') : '';
+    if ($customSummary) {
+        $summaryContent = $customSummary;
     } elseif ($widget->fields->excerpt && $widget->fields->excerpt != '') {
         $summaryContent = $widget->fields->excerpt;
     } else {
@@ -1339,7 +2522,8 @@ function summaryContent($widget)
 //主页封面处理函数
 function noCover($widget)
 {
-    if ($widget->fields->NoCover == "off") {
+    $noCover = isset($widget->cid) ? getThemeFieldValue($widget->cid, 'NoCover', 'on') : 'on';
+    if ($noCover == "off") {
         return false;
     }
     return true;
@@ -1501,7 +2685,7 @@ function getSiteStatistics()
 
 function getThemeVersion()
 {
-  $version = Plugin::parseInfo(Helper::options()->themeFile(Helper::options()->theme, "index.php"))["version"];
+  $version = Typecho_Plugin::parseInfo(Helper::options()->themeFile(Helper::options()->theme, "index.php"))["version"];
   return $version;
 }
 
@@ -1570,18 +2754,26 @@ function restFull($url, $params, $method, $header = array(), $timeout = 5, $cook
 
 // 添加缓存清理函数，可以在文章更新、评论发布等操作后调用
 function clearCache($key = null) {
+    if (Helper::options()->EnableCache != 'file') {
+        return;
+    }
+
+    if (!ensureFileCacheDirectoryAvailable()) {
+        return;
+    }
+
     if ($key) {
-        $cache_file = __TYPECHO_ROOT_DIR__ . '/usr/cache/' . md5($key) . '.cache';
+        $cache_file = getCacheDirectoryPath() . md5($key) . '.cache';
         if (file_exists($cache_file)) {
-            unlink($cache_file);
+            @unlink($cache_file);
         }
     } else {
         // 清除所有缓存
-        $cache_dir = __TYPECHO_ROOT_DIR__ . '/usr/cache/';
+        $cache_dir = getCacheDirectoryPath();
         if (is_dir($cache_dir)) {
             $files = glob($cache_dir . '*.cache');
             foreach ($files as $file) {
-                unlink($file);
+                @unlink($file);
             }
         }
     }
@@ -1602,11 +2794,17 @@ function clearCacheOnSave($contents, $edit) {
         clearCache('post_content_' . $cid);
         clearCache('post_full_content_' . $cid);
         clearCache('post_parsed_content_' . $cid);
+        clearCache('post_parsed_content_v2_' . $cid);
         clearCache('post_details_' . $cid);
+        clearCache('post_basic_' . $cid);
+        clearCache('post_thumb_' . $cid);
+        clearCache('theme_fields_' . $cid);
         
         // 清除不同用户状态的缓存版本
         clearCache('post_parsed_content_' . $cid . '_logged_in');
         clearCache('post_parsed_content_' . $cid . '_guest');
+        clearCache('post_parsed_content_v2_' . $cid . '_logged_in');
+        clearCache('post_parsed_content_v2_' . $cid . '_guest');
         
         // 清除评论用户的缓存版本
         $db = Typecho_Db::get();
@@ -1616,6 +2814,8 @@ function clearCacheOnSave($contents, $edit) {
             if ($commenter['mail']) {
                 clearCache('post_parsed_content_' . $cid . '_' . md5($commenter['mail']));
                 clearCache('post_parsed_content_' . $cid . '_' . md5($commenter['mail']) . '_commented');
+                clearCache('post_parsed_content_v2_' . $cid . '_' . md5($commenter['mail']));
+                clearCache('post_parsed_content_v2_' . $cid . '_' . md5($commenter['mail']) . '_commented');
             }
         }
     }
@@ -1625,21 +2825,156 @@ function clearCacheOnSave($contents, $edit) {
 
 // 在评论发布后清除相关缓存
 function clearCacheOnComment($comment) {
-    if (isset($comment->cid)) {
-        $cid = $comment->cid;
+    $cid = 0;
+    $mail = '';
+
+    if (is_object($comment)) {
+        $cid = isset($comment->cid) ? (int)$comment->cid : 0;
+        $mail = isset($comment->mail) ? $comment->mail : '';
+    } elseif (is_array($comment)) {
+        $cid = isset($comment['cid']) ? (int)$comment['cid'] : 0;
+        $mail = isset($comment['mail']) ? $comment['mail'] : '';
+    }
+
+    if ($cid > 0) {
         // 清除文章详情缓存
         clearCache('post_details_' . $cid);
+        clearCache('post_basic_' . $cid);
+        clearCache('post_thumb_' . $cid);
         
         // 清除该评论者相关的文章内容缓存
-        if ($comment->mail) {
-            clearCache('post_parsed_content_' . $cid . '_' . md5($comment->mail));
-            clearCache('post_parsed_content_' . $cid . '_' . md5($comment->mail) . '_commented');
+        if ($mail) {
+            clearCache('post_parsed_content_' . $cid . '_' . md5($mail));
+            clearCache('post_parsed_content_' . $cid . '_' . md5($mail) . '_commented');
+            clearCache('post_parsed_content_v2_' . $cid . '_' . md5($mail));
+            clearCache('post_parsed_content_v2_' . $cid . '_' . md5($mail) . '_commented');
         }
         
         // 清除访客版本的缓存
         clearCache('post_parsed_content_' . $cid . '_guest');
+        clearCache('post_parsed_content_v2_' . $cid . '_guest');
+
+        // 切换评论缓存版本
+        bumpCommentsCacheVersion($cid);
     }
     return $comment;
+}
+
+function getCommentsCacheVersion($cid)
+{
+    $cid = (int)$cid;
+    if ($cid <= 0) {
+        return '0';
+    }
+
+    $key = 'comments_version_' . $cid;
+    $version = getCache($key, 31536000);
+    if ($version === false) {
+        $version = '1';
+        setCache($key, $version);
+    }
+
+    return (string)$version;
+}
+
+function bumpCommentsCacheVersion($cid)
+{
+    $cid = (int)$cid;
+    if ($cid > 0) {
+        $registryKey = 'comments_list_registry_' . $cid;
+        $registry = getCache($registryKey, 31536000);
+        if (is_array($registry)) {
+            foreach ($registry as $cacheKey) {
+                clearCache($cacheKey);
+            }
+        }
+        clearCache($registryKey);
+        setCache('comments_version_' . $cid, (string)microtime(true));
+    }
+}
+
+function registerCommentsCacheKey($cid, $cacheKey)
+{
+    $cid = (int)$cid;
+    if ($cid <= 0 || empty($cacheKey)) {
+        return;
+    }
+
+    $registryKey = 'comments_list_registry_' . $cid;
+    $registry = getCache($registryKey, 31536000);
+    if (!is_array($registry)) {
+        $registry = array();
+    }
+
+    if (!in_array($cacheKey, $registry, true)) {
+        $registry[] = $cacheKey;
+        setCache($registryKey, $registry);
+    }
+}
+
+function getCommentsCacheIdentity($archive)
+{
+    $user = Typecho_Widget::widget('Widget_User');
+    $author = trim((string)$archive->remember('author', true));
+    $mail = trim((string)$archive->remember('mail', true));
+    $uid = $user->hasLogin() ? (string)$user->uid : '0';
+
+    if ($author !== '' || $mail !== '' || $uid !== '0') {
+        return 'viewer_' . md5($uid . '|' . $author . '|' . $mail);
+    }
+
+    return 'guest_public';
+}
+
+function getCommentsCurrentPage($archive)
+{
+    if (isset($archive->parameter) && isset($archive->parameter->commentPage)) {
+        return (int)$archive->parameter->commentPage;
+    }
+
+    if (isset($archive->request)) {
+        return (int)$archive->request->filter('int')->get('commentPage');
+    }
+
+    return 0;
+}
+
+function buildCommentsListHtml($archive)
+{
+    ob_start();
+    $archive->comments()->to($comments);
+    if ($comments->have()) :
+?>
+        <h3><?php $archive->commentsNum(_t('暂无评论'), _t('仅有一条评论'), _t('已有 %d 条评论')); ?></h3>
+        <?php $comments->listComments(); ?>
+        <?php $comments->pageNav('<i class="fas fa-chevron-left fa-fw"></i>', '<i class="fas fa-chevron-right fa-fw"></i>', 1, '...', array('wrapTag' => 'ol', 'wrapClass' => 'page-navigator', 'itemTag' => '', 'prevClass' => 'prev', 'nextClass' => 'next', 'currentClass' => 'current')); ?>
+<?php
+    endif;
+    return ob_get_clean();
+}
+
+function getCachedCommentsListHtml($archive)
+{
+    if (Helper::options()->EnableCache != 'file') {
+        return buildCommentsListHtml($archive);
+    }
+
+    $cid = (int)$archive->cid;
+    $page = getCommentsCurrentPage($archive);
+    $version = getCommentsCacheVersion($cid);
+    $identity = getCommentsCacheIdentity($archive);
+    $cache_key = 'comments_list_' . $cid . '_p' . $page . '_' . $version . '_' . $identity;
+    $cache_time = Helper::options()->CacheTime ? intval(Helper::options()->CacheTime) : 86400;
+    $cached = getCache($cache_key, $cache_time);
+
+    if ($cached !== false) {
+        return $cached;
+    }
+
+    $html = buildCommentsListHtml($archive);
+    registerCommentsCacheKey($cid, $cache_key);
+    setCache($cache_key, $html);
+    return $html;
 }
 
 // 优化缓存文章内容函数
@@ -1688,7 +3023,7 @@ function getCachedPostContent($archive) {
     $userEmail = $archive->remember('mail', true);
     
     // 根据不同状态使用不同的缓存键
-    $cache_key = 'post_parsed_content_' . $cid;
+    $cache_key = 'post_parsed_content_v2_' . $cid;
     if ($isLoggedIn) {
         $cache_key .= '_logged_in';
     } elseif ($userEmail) {
@@ -1701,11 +3036,11 @@ function getCachedPostContent($archive) {
     $hasCommented = false;
     if ($userEmail) {
         $db = Typecho_Db::get();
-        $sql = $db->select()->from('table.comments')
+        $sql = $db->select('coid')->from('table.comments')
             ->where('cid = ?', $cid)
             ->where('mail = ?', $userEmail)
             ->limit(1);
-        $result = $db->fetchAll($sql);
+        $result = $db->fetchRow($sql);
         $hasCommented = !empty($result);
         
         if ($hasCommented) {
@@ -1721,16 +3056,8 @@ function getCachedPostContent($archive) {
     }
     
     // 处理内容
-    if ($isLoggedIn || $hasCommented) {
-        $content = preg_replace("/\[hide\](.*?)\[\/hide\]/sm", '<div class="reply-content">$1</div>', $archive->content);
-    } else {
-        $content = preg_replace("/\[hide\](.*?)\[\/hide\]/sm", '<p class="need-reply">此处内容 <a href="#comments">回复</a> 可见</p>', $archive->content);
-    }
+    $content = replaceHideContent($archive->content, $isLoggedIn || $hasCommented);
     
-    // 应用其他自定义格式化函数（如果有）
-    if (function_exists('ParseCode')) {
-        $content = ParseCode($content);
-    }
     // 缓存处理后的内容
     setCache($cache_key, $content);
     return $content;
@@ -1749,28 +3076,48 @@ function processPostContent($archive) {
     $userEmail = $archive->remember('mail', true);
     if ($userEmail) {
         $db = Typecho_Db::get();
-        $sql = $db->select()->from('table.comments')
+        $sql = $db->select('coid')->from('table.comments')
             ->where('cid = ?', $cid)
             ->where('mail = ?', $userEmail)
             ->limit(1);
-        $result = $db->fetchAll($sql);
+        $result = $db->fetchRow($sql);
         $hasCommented = !empty($result);
     }
     
     // 根据用户状态处理隐藏内容
-    if ($isLoggedIn || $hasCommented) {
-        $content = preg_replace("/\[hide\](.*?)\[\/hide\]/sm", '<div class="reply-content">$1</div>', $archive->content);
-    } else {
-        $content = preg_replace("/\[hide\](.*?)\[\/hide\]/sm", '<p class="need-reply">此处内容 <a href="#comments">回复</a> 可见</p>', $archive->content);
-    }
-    
-    // 应用其他自定义格式化函数（如果有）
-    if (function_exists('ParseCode')) {
-        $content = ParseCode($content);
-    }
+    $content = replaceHideContent($archive->content, $isLoggedIn || $hasCommented);
     
     return $content;
 }
+
+class ThemeCacheHooks
+{
+    public static function handleSave($contents, $edit)
+    {
+        return clearCacheOnSave($contents, $edit);
+    }
+
+    public static function handleComment($comment)
+    {
+        return clearCacheOnComment($comment);
+    }
+
+    public static function handleCommentEdit($comment)
+    {
+        return clearCacheOnComment($comment);
+    }
+
+    public static function handleCommentMark($comment, $edit, $status)
+    {
+        return clearCacheOnComment($comment);
+    }
+}
+
+Typecho_Plugin::factory('Widget_Contents_Post_Edit')->finishPublish = array('ThemeCacheHooks', 'handleSave');
+Typecho_Plugin::factory('Widget_Contents_Page_Edit')->finishPublish = array('ThemeCacheHooks', 'handleSave');
+Typecho_Plugin::factory('Widget_Feedback')->finishComment = array('ThemeCacheHooks', 'handleComment');
+Typecho_Plugin::factory('Widget_Comments_Edit')->finishComment = array('ThemeCacheHooks', 'handleCommentEdit');
+Typecho_Plugin::factory('Widget_Comments_Edit')->mark = array('ThemeCacheHooks', 'handleCommentMark');
 
 // Typecho_Plugin::factory('Widget_Contents_Post_Edit')->finishPublish = array('ThemeCacheCleaner', 'clearCache');
 // Typecho_Plugin::factory('Widget_Contents_Page_Edit')->finishPublish = array('ThemeCacheCleaner', 'clearCache');

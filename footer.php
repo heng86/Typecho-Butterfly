@@ -82,7 +82,7 @@
       <div id="local-search-input">
         <form class="local-search-box" method="post" action="<?php $this->options->siteUrl(); ?>" role="search" id="search">
           <label for="s" class="sr-only"><?php _e('搜索关键字'); ?></label>
-          <input type="text" name="s" placeholder="回车查询" required="required">
+          <input type="text" name="s" placeholder="输入至少 2 个字搜索" required="required">
       </div>
       </form>
       <hr>
@@ -96,11 +96,15 @@
 <div class="js-pjax">
   <script data-pjax src="<?php $this->options->themeUrl('js/comjs.js?v1.8.0'); ?>"></script>
   <script data-pjax src="<?php $this->options->themeUrl('/js/smooth.min.js'); ?>"> </script>
+  <script data-pjax src="<?php $this->options->themeUrl('js/weibo-hot.js?v1.0.0'); ?>"></script>
   <?php if (is_array($this->options->beautifyBlock) && in_array('showNoAlertSearch', $this->options->beautifyBlock)) : ?>
-    <script>
+    <script data-pjax>
       (function() {
         const searchButton = document.getElementById('search-button');
         const input = document.getElementById('dSearchIn');
+        if (!searchButton || !input) {
+          return;
+        }
         searchButton.addEventListener('click', function() {
           input.style.width = '150px';
           input.focus();
@@ -112,14 +116,15 @@
     </script>
   <?php endif ?>
   <?php if (!empty($this->options->hcaptchaSecretKey) && !empty($this->options->hcaptchaAPIKey)) : ?>
-    <script src="https://hcaptcha.com/1/api.js" async defer></script>
+    <script data-pjax src="https://hcaptcha.com/1/api.js" async defer></script>
   <?php endif ?>
   <?php if ($this->is('post') || $this->is('page')) : ?>
-    <script>
-      document.addEventListener('DOMContentLoaded', ()=>{
-        initializeCodeToolbar();
-        tocCheck();
-      });
+    <script data-pjax>
+      (() => {
+        if (typeof tocCheck === 'function') {
+          tocCheck();
+        }
+      })();
     </script>
   <?php endif ?>
 
@@ -127,7 +132,7 @@
     <script data-pjax>
       function butterfly_clock_anzhiyu_injector_config() {
         var a = document.getElementsByClassName("sticky_layout")[0];
-        a && a.insertAdjacentHTML("afterbegin", '<div class="card-widget card-clock"><div class="card-glass"><div class="card-background"><div class="card-content"><div id="hexo_electric_clock"><img class="entered loading" id="card-clock-loading" src= "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-lazy-src="https://cdn.cbd.int/hexo-butterfly-clock-anzhiyu/lib/loading.gif" style="height: 120px; width: 100%;" data-ll-status="loading"/></div></div></div></div></div>')
+        a && a.insertAdjacentHTML("afterbegin", '<div class="card-widget card-clock"><div class="card-glass"><div class="card-background"><div class="card-content"><div id="hexo_electric_clock"><img class="entered loading" id="card-clock-loading" src= "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-lazy-src="https://cdn.cbd.int/hexo-butterfly-clock-anzhiyu/lib/loading.gif" style="height: 120px; width: 100%;" data-ll-status="loading" alt="时钟加载动画" title="时钟加载动画"/></div></div></div></div></div>')
       }
       for (var elist = "null".split(","), cpage = location.pathname, epage = "all",
           qweather_key = "<?php $this->options->qweather_key() ?>",
@@ -136,26 +141,22 @@
           clock_rectangle = "112.6534116,27.96920845", clock_default_rectangle_enable = "false", i = 0; i < elist.length; i++) cpage.includes(elist[i]) && flag++;
       "all" === epage && 0 == flag ? butterfly_clock_anzhiyu_injector_config() : epage === cpage && butterfly_clock_anzhiyu_injector_config()
     </script>
-    <script src="https://widget.qweather.net/simple/static/js/he-simple-common.js?v=2.0"></script>
+    <script data-pjax src="https://widget.qweather.net/simple/static/js/he-simple-common.js?v=2.0"></script>
     <script data-pjax src="https://cdn.cbd.int/hexo-butterfly-clock-anzhiyu/lib/clock.min.js"></script>
     <link rel="stylesheet" href="https://cdn.cbd.int/hexo-butterfly-clock-anzhiyu/lib/clock.min.css">
   <?php endif ?>
   <?php $this->header('commentReply=1&description=0&keywords=0&generator=0&template=0&pingback=0&xmlrpc=0&wlw=0&rss2=0&rss1=0&antiSpam=0&atom'); ?>
-  <?php if ($this->options->NewTabLink == 'on') : ?>
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        var aElements = document.getElementsByTagName('a');
-        var domain = document.domain;
-
-        for (var i = 0; i < aElements.length; i++) {
-          var aElement = aElements[i];
-          var url = aElement.href;
-
-          if (url && url.length > 0 && url.indexOf(domain) === -1 && url !== 'javascript:void(0);') {
-            aElement.setAttribute('target', '_blank');
-          }
+  <?php if ($this->options->NewTabLink == 'on' || $this->options->ExternalLinkConfirm == 'on') : ?>
+    <script data-pjax>
+      (function() {
+        if (typeof ExternalLinkConfirm === 'undefined') {
+          return;
         }
-      });
+        ExternalLinkConfirm.init({
+          enableNewTab: <?php echo $this->options->NewTabLink == 'on' ? 'true' : 'false'; ?>,
+          enableConfirm: <?php echo $this->options->ExternalLinkConfirm == 'on' ? 'true' : 'false'; ?>
+        });
+      })();
     </script>
   <?php endif; ?>
   <?php if ($this->is('index')) : ?>
@@ -167,7 +168,7 @@
     <!--打字-->
     <?php if (is_array($this->options->beautifyBlock) && in_array('ShowTopimg', $this->options->beautifyBlock)) : ?>
       <?php if (!empty($this->options->CustomSubtitle)) : ?>
-        <script>
+        <script data-pjax>
           function subtitleType() {
             if (true) {
               var typed = new Typed("#subtitle", {
@@ -179,11 +180,11 @@
               })
             }
           }
-          "function" == typeof Typed ? subtitleType() : getScript("/usr/themes/butterfly/js/typed.min.js")
+          "function" == typeof Typed ? subtitleType() : getScript("<?php $this->options->themeUrl('js/typed.min.js'); ?>")
             .then(subtitleType)
         </script>
       <?php else : ?>
-        <script>
+        <script data-pjax>
           function subtitleType() {
             fetch("https://v1.hitokoto.cn").then(t => t.json()).then(t => {
               o = 0 == "".length ? new Array : " ".split(",");
@@ -197,7 +198,7 @@
                 })
             })
           }
-          "function" == typeof Typed ? subtitleType() : getScript("/usr/themes/butterfly/js/typed.min.js")
+          "function" == typeof Typed ? subtitleType() : getScript("<?php $this->options->themeUrl('js/typed.min.js'); ?>")
             .then(subtitleType)
         </script>
       <?php endif ?>
@@ -216,8 +217,11 @@
     $num = count($cid);
     $html = "";
     for ($i = 0; $i < $num; $i++) {
-      $this->widget('Widget_Archive@post' . $i, 'pageSize=1&type=post', 'cid=' . $cid[$i])->to($ji);
-      $html = $html . '<div class="blog-slider__item swiper-slide" style="width: 750px; opacity: 1; transform: translate3d(0px, 0px, 0px); transition-duration: 0ms;"><a class="blog-slider__img" href="' . $ji->permalink . '" alt=""><img width="48" height="48" src="' . get_ArticleThumbnail($ji) . '" alt="" /></a><div class="blog-slider__content"><span class="blog-slider__code">' . date('Y-m-d', $ji->modified) . '</span><a class="blog-slider__title" href="' . $ji->permalink . '" alt="' . $ji->title . '">' . $ji->title . '</a><div class="blog-slider__text">' . $ji->title . '</div><a class="blog-slider__button" href="' . $ji->permalink . '" alt="">详情</a></div></div>';
+      $ji = getPostBasicByCid($cid[$i]);
+      if (!$ji) {
+        continue;
+      }
+      $html = $html . '<div class="blog-slider__item swiper-slide" style="width: 750px; opacity: 1; transform: translate3d(0px, 0px, 0px); transition-duration: 0ms;"><a class="blog-slider__img" href="' . $ji['permalink'] . '"><img width="48" height="48" src="' . get_ArticleThumbnail($ji) . '" alt="' . htmlspecialchars($ji['title'], ENT_QUOTES, 'UTF-8') . '" title="' . htmlspecialchars($ji['title'], ENT_QUOTES, 'UTF-8') . '" /></a><div class="blog-slider__content"><span class="blog-slider__code">' . date('Y-m-d', $ji['modified']) . '</span><a class="blog-slider__title" href="' . $ji['permalink'] . '">' . htmlspecialchars($ji['title'], ENT_QUOTES, 'UTF-8') . '</a><div class="blog-slider__text">' . htmlspecialchars($ji['title'], ENT_QUOTES, 'UTF-8') . '</div><a class="blog-slider__button" href="' . $ji['permalink'] . '">详情</a></div></div>';
     }
     echo $html;
 ?>
@@ -229,7 +233,7 @@
         butterfly_swiper_injector_config()
       }
     </script>
-    <script src="https://npm.elemecdn.com/hexo-butterfly-swiper/lib/swiper.min.js"></script>
+    <script data-pjax src="https://npm.elemecdn.com/hexo-butterfly-swiper/lib/swiper.min.js"></script>
     <script data-pjax src="https://npm.elemecdn.com/hexo-butterfly-swiper/lib/swiper_init.js"></script>
     <link rel="stylesheet" href="https://npm.elemecdn.com/hexo-butterfly-swiper/lib/swiperstyle.css">
     <link rel="stylesheet" href="https://npm.elemecdn.com/hexo-butterfly-swiper/lib/swiper.min.css">
@@ -244,7 +248,42 @@
   <script src="<?php cdnBaseUrl() ?>/js/nprogress.js"></script>
   <script>
     let intervalNum = 0;
-    let pjaxSelectors = ["title", "#body-wrap", "#rightside-config-hide", "#rightside-config-show", ".js-pjax"];
+    let pjaxSelectors = ["title", "#config-diff", "#config_change", "#body-wrap", "#rightside-config-hide", "#rightside-config-show", ".js-pjax"];
+    const resetPjaxUiState = () => {
+      const bodyStyle = document.body.style;
+      bodyStyle.width = "";
+      bodyStyle.overflow = "";
+      bodyStyle.paddingRight = "";
+      const sidebarMenus = document.getElementById("sidebar-menus");
+      sidebarMenus && sidebarMenus.classList.remove("open");
+    };
+    const executePjaxScripts = () => {
+      const scripts = [...document.querySelectorAll("script[data-pjax]")];
+      return scripts.reduce((promise, currentScript) => {
+        return promise.then(() => new Promise(resolve => {
+          const parentNode = currentScript.parentNode;
+          if (!parentNode) {
+            resolve();
+            return;
+          }
+          const newScript = document.createElement("script");
+          const scriptContent = currentScript.text || currentScript.textContent || currentScript.innerHTML || "";
+          Array.from(currentScript.attributes).forEach(attribute => {
+            newScript.setAttribute(attribute.name, attribute.value);
+          });
+          if (newScript.src) {
+            newScript.async = false;
+            newScript.onload = () => resolve();
+            newScript.onerror = () => resolve();
+            parentNode.replaceChild(newScript, currentScript);
+            return;
+          }
+          newScript.appendChild(document.createTextNode(scriptContent));
+          parentNode.replaceChild(newScript, currentScript);
+          resolve();
+        }));
+      }, Promise.resolve());
+    };
     var pjax = new Pjax({
       elements: 'a:not([target="_blank"])',
       selectors: pjaxSelectors,
@@ -253,6 +292,7 @@
       scrollRestoration: !1
     });
     document.addEventListener("pjax:send", (function() {
+        resetPjaxUiState();
         if (window.removeEventListener("scroll", window.tocScrollFn), window.removeEventListener("scroll", scrollCollect), "object" == typeof preloader && preloader.initLoading(), window.aplayers)
           for (let e = 0; e < window.aplayers.length; e++) window.aplayers[e].options.fixed || window.aplayers[e].destroy();
         "object" == typeof typed && typed.destroy();
@@ -262,54 +302,36 @@
         intervalNum = 0
       })),
       document.addEventListener("pjax:complete", (function() {
-        <?php if (!empty($this->options->hcaptchaSecretKey) && !empty($this->options->hcaptchaAPIKey)) : ?>
-          hcaptcha.render('h-captcha', {
-            sitekey: '<?php $this->options->hcaptchaSecretKey() ?>'
-          });
-        <?php endif ?>
-        <?php if (!empty($this->options->turnstileSiteKey) && !empty($this->options->turnstileKey)) : ?>
-          if (typeof loadTurnstile === "function") {
-            loadTurnstile();
-          }
-          if (typeof setupThemeObserver === "function") {
-            setupThemeObserver();
-          }
-        <?php endif ?>
         <?php $this->options->PjaxCallBack() ?>
         NProgress.done();
-        const checkInterval = setInterval(() => {
-          intervalNum ++
-          if(intervalNum > 100 || document.querySelectorAll(".recent-post-item").length > 0){
-            clearInterval(checkInterval)
-          }
-          if(document.getElementsByTagName('article').length > 0){
-            clearInterval(checkInterval)
-            initializeCodeToolbar()
-            if (document.getElementById("web-login")) {
-              webLogin()
-              document.querySelector('.submit').addEventListener("click", function() {
-                document.getElementById("comment_login").classList.toggle("login_active");
+        executePjaxScripts().then(() => {
+          <?php if (!empty($this->options->hcaptchaSecretKey) && !empty($this->options->hcaptchaAPIKey)) : ?>
+            if (typeof hcaptcha !== "undefined" && document.getElementById('h-captcha') && !document.querySelector('#h-captcha iframe')) {
+              hcaptcha.render('h-captcha', {
+                sitekey: '<?php $this->options->hcaptchaSecretKey() ?>'
               });
             }
-            if(document.querySelector('.toc')){
-              tocCheck()
+          <?php endif ?>
+          <?php if (!empty($this->options->turnstileSiteKey) && !empty($this->options->turnstileKey)) : ?>
+            if (typeof loadTurnstile === "function") {
+              loadTurnstile();
             }
-          }
-        }, 600);
-        window.refreshFn(),
-          document.querySelectorAll("script[data-pjax]").forEach(e => {
-            const t = document.createElement("script"),
-              o = e.text || e.textContent || e.innerHTML || "";
-            Array.from(e.attributes).forEach(e => t.setAttribute(e.name, e.value)), t.appendChild(document.createTextNode(o)), e.parentNode.replaceChild(t, e)
-          }),
-          GLOBAL_CONFIG.islazyload && window.lazyLoadInstance.update(), "function" == typeof chatBtnFn && chatBtnFn(), "function" == typeof panguInit && panguInit(), "function" == typeof gtag && gtag("config", "", {
-            page_path: window.location.pathname
-          }),
-          "object" == typeof _hmt && _hmt.push(["_trackPageview", window.location.pathname]),
-          "function" == typeof loadMeting && document.getElementsByClassName("aplayer").length && loadMeting(),
-          "object" == typeof Prism && Prism.highlightAll(), "object" == typeof preloader && preloader.endLoading()
+            if (typeof setupThemeObserver === "function") {
+              setupThemeObserver();
+            }
+          <?php endif ?>
+          "function" == typeof window.refreshFn && window.refreshFn(),
+            "function" == typeof tocCheck && tocCheck(),
+            GLOBAL_CONFIG.islazyload && window.lazyLoadInstance && window.lazyLoadInstance.update(), "function" == typeof chatBtnFn && chatBtnFn(), "function" == typeof panguInit && panguInit(), "function" == typeof gtag && gtag("config", "", {
+              page_path: window.location.pathname
+            }),
+            "object" == typeof _hmt && _hmt.push(["_trackPageview", window.location.pathname]),
+            "function" == typeof loadMeting && document.getElementsByClassName("aplayer").length && loadMeting(),
+            "object" == typeof preloader && preloader.endLoading()
+        })
       })),
       document.addEventListener("pjax:error", e => {
+        resetPjaxUiState();
         // 404 === e.request.status && pjax.loadUrl("/404");
         if (e.request.status === 404) {
           window.location = "/404";

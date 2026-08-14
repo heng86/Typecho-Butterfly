@@ -24,7 +24,7 @@
   <link rel="preconnect" href="//<?php $this->options->jsdelivrLink() ?>" />
   <!--<link rel="stylesheet" href="https://cdn.jsdmirror.com/npm/justifiedGallery/dist/css/justifiedGallery.min.css">-->
   <link rel="stylesheet" href="<?php $this->options->themeUrl('index.css?v1.7.3'); ?>">
-  <link rel="stylesheet" href="<?php $this->options->themeUrl('css/style.css?v1.7.8'); ?>">
+  <link rel="stylesheet" href="<?php $this->options->themeUrl('css/style.css?v1.8.2'); ?>">
   <!--魔改美化-->
   <?php if (!empty($this->options->beautifyBlock) && in_array('ShowBeautifyChange', $this->options->beautifyBlock)) : ?>
     <link rel="stylesheet" href="<?php $this->options->themeUrl('css/custom.css?v1.8.1'); ?>">
@@ -99,9 +99,11 @@
       root: "/",
       algolia: void 0,
       localSearch: {
-        path: undefined,
+        path: <?php echo json_encode(rtrim($this->options->themeUrl, '/') . '/api/api.php?action=search'); ?>,
         languages: {
-          hits_empty: "回车查询：${query}"
+          hits_empty: "未找到与 “${query}” 相关内容",
+          query_too_short: "请输入至少 2 个字的关键词",
+          search_error: "搜索失败，请稍后重试"
         }
       },
       translate: {
@@ -147,8 +149,8 @@
       },
       source: {
         justifiedGallery: {
-          js: "https://cdn.bootcdn.net/ajax/libs/flickr-justified-gallery/2.1.2/fjGallery.min.js",
-          css: "https://cdn.bootcdn.net/ajax/libs/flickr-justified-gallery/2.1.2/fjGallery.min.css"
+          js: "https://<?php $this->options->jsdelivrLink() ?>/npm/flickr-justified-gallery@2.1.2/dist/fjGallery.min.js",
+          css: "https://<?php $this->options->jsdelivrLink() ?>/npm/flickr-justified-gallery@2.1.2/dist/fjGallery.min.css"
         }
       },
       isPhotoFigcaption: !1,
@@ -200,30 +202,34 @@
       document.head.appendChild(script)
     })
   </script>
-  <script id="config-diff">
+  <?php
+  $disableToc = !empty($GLOBALS['BUTTERFLY_DISABLE_TOC']);
+  $currentShowToc = (($this->is('single') || $this->is('page')) && !$disableToc) ? getThemeFieldValue($this->cid, 'ShowToc', 'show') : 'off';
+  ?>
+  <script id="config-diff" data-pjax>
     var GLOBAL_CONFIG_SITE = {
       isPost: !0,
       isHome: !0,
       isHighlightShrink: !0,
-      isToc: <?php echo $this->fields->ShowToc === 'off' ? 0 : 1; ?>,
+      isToc: <?php echo $currentShowToc === 'off' ? 0 : 1; ?>,
     }
   </script>
   <?php if ($this->is('post')) : ?>
-    <script id="config_change">
+    <script id="config_change" data-pjax>
       var GLOBAL_CONFIG_SITE = {
         isPost: !0,
         isHome: !0,
         isHighlightShrink: !1,
-        isToc: <?php echo $this->fields->ShowToc === 'off' ? 0 : 1; ?>,
+        isToc: <?php echo $currentShowToc === 'off' ? 0 : 1; ?>,
       }
     </script>
   <?php else : ?>
-    <script id="config_change">
+    <script id="config_change" data-pjax>
       var GLOBAL_CONFIG_SITE = {
         isPost: !1,
         isHome: !0,
         isHighlightShrink: !1,
-        isToc: <?php echo $this->fields->ShowToc === 'off' ? 0 : 1; ?>,
+        isToc: <?php echo $currentShowToc === 'off' ? 0 : 1; ?>,
       }
     </script>
   <?php endif; ?>
@@ -284,22 +290,48 @@
       e.activateLightMode = () => {
         document.documentElement.setAttribute("data-theme", "light"), null !== document.querySelector('meta[name="theme-color"]') && document.querySelector('meta[name="theme-color"]').setAttribute("content", "#ffffff")
       };
-      const t = saveToLocal.get("theme"),
-        a = <?php $this->options->darkModeSelect() ?> === 4,
-        o = <?php $this->options->darkModeSelect() ?> === 1,
-        c = <?php $this->options->darkModeSelect() ?> === 2,
-        n = !a && !o && !c;
+      const t = saveToLocal.get("theme");
+      
+      // 1. 将 PHP 输出包裹在引号中并转为整数，防止后台配置为空时 JS 语法报错崩溃
+      const darkModeSetting = parseInt('<?php $this->options->darkModeSelect() ?>', 10);
+      
+      // 2. 统一判断模式
+      const isDarkMode = darkModeSetting === 4,
+            isLightMode = darkModeSetting === 1,
+            isSystemMode = darkModeSetting === 2,
+            isTimeMode = !isDarkMode && !isLightMode && !isSystemMode;
+      
       if (void 0 === t) {
-        if (o) activateLightMode();
-        else if (a) activateDarkMode();
-        else if (n) {
-          const e = (new Date).getHours();
-          <?php darkTimeFunc() ?> ? activateDarkMode() : activateLightMode()
+        if (isLightMode) {
+          activateLightMode();
+        } 
+        else if (isDarkMode) {
+          activateDarkMode();
+        } 
+        else if (isSystemMode) {
+          // 跟随系统模式
+          const media = window.matchMedia("(prefers-color-scheme: dark)");
+          media.matches ? activateDarkMode() : activateLightMode();
+      
+          // 【重要修复】只在“跟随系统”模式下，才注册系统主题切换监听器
+          media.addEventListener("change", e => {
+            if (void 0 === saveToLocal.get("theme")) {
+              e.matches ? activateDarkMode() : activateLightMode();
+            }
+          });
+        } 
+        else if (isTimeMode) {
+          // 时间段控制：改用 if 判断更具容错性
+          if (<?php darkTimeFunc() ?>) {
+            activateDarkMode();
+          } else {
+            activateLightMode();
+          }
         }
-        window.matchMedia("(prefers-color-scheme: dark)").addListener((e => {
-          void 0 === saveToLocal.get("theme") && (e.matches ? activateDarkMode() : activateLightMode())
-        }))
-      } else "light" === t ? activateLightMode() : activateDarkMode();
+      } else {
+        // 用户手动切换过，以本地缓存为准
+        "light" === t ? activateLightMode() : activateDarkMode();
+      }
       const d = saveToLocal.get("aside-status");
       void 0 !== d && ("hide" === d ? document.documentElement.classList.add("hide-aside") : document.documentElement.classList.remove("hide-aside"));
       /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && document.documentElement.classList.add("apple")
@@ -434,8 +466,10 @@
 </head>
 
 <body>
-  <script src="<?php $this->options->themeUrl('/js/main.js?v1.8.1'); ?>"> </script>
+  <?php renderFileCachePermissionWarning(); ?>
+  <script src="<?php $this->options->themeUrl('/js/main.js?v1.8.3'); ?>"> </script>
   <script src="<?php $this->options->themeUrl('/js/utils.js?v1.7.3'); ?>"> </script>
+  <script src="<?php $this->options->themeUrl('/js/external-link-confirm.js?v1.0.0'); ?>"> </script>
   <script src="<?php $this->options->themeUrl('/js/tw_cn.js?v1.7.3'); ?>"> </script>
   <?php if (is_array($this->options->beautifyBlock) && !in_array('showNoAlertSearch', $this->options->beautifyBlock)) : ?>
     <script src="<?php $this->options->themeUrl('/js/local-search.js'); ?>"> </script>
@@ -457,7 +491,7 @@
     <div id="menu-mask" style="display: none;"></div>
     <div id="sidebar-menus" class="">
       <div class="avatar-img is-center">
-        <img src="<?php $this->options->logoUrl() ?>" onerror="this.onerror=null;this.src='https://<?php $this->options->jsdelivrLink() ?>/npm/hexo-butterfly@1.0.0/themes/butterfly/source/img/friend_404.gif'" alt="avatar">
+        <img src="<?php echo getAuthorAvatarUrl(); ?>" onerror="this.onerror=null;this.src='https://<?php $this->options->jsdelivrLink() ?>/npm/hexo-butterfly@1.0.0/themes/butterfly/source/img/friend_404.gif'" alt="avatar">
       </div>
       <div class="site-data">
         <div class="card-info-data site-data is-center">
